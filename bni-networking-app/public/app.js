@@ -1,26 +1,33 @@
 'use strict';
 
 // BizConnect frontend — a tiny dependency-free SPA.
-// State lives in memory; every view re-fetches from the REST API so data stays
-// fresh after creates. Rendering is plain template strings injected into #app.
+// The app has two modes: an auth screen when logged out, and the main app when
+// logged in. `currentUser` is the logged-in member; their identity is used
+// implicitly when creating posts and listings (no member dropdowns).
 
 const app = document.getElementById('app');
+const appRoot = document.getElementById('appRoot');
+const authScreen = document.getElementById('authScreen');
+const fab = document.getElementById('fab');
+
+let currentUser = null;
 let currentView = 'feed';
 let searchKind = '';
 let searchTimer = null;
 
-// --- API helpers -----------------------------------------------------------
+// --- API helper ------------------------------------------------------------
 
 async function api(path, opts) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin', // send the session cookie
     ...opts,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Request failed: ${res.status}`);
   }
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
 const esc = (s) =>
@@ -37,6 +44,101 @@ const tagPills = (tags) =>
         .filter(Boolean)
         .map((t) => `<span class="tag">${esc(t)}</span>`)
         .join('')}</div>`;
+
+const val = (id) => {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+};
+
+// --- Auth flow -------------------------------------------------------------
+
+async function boot() {
+  currentUser = await api('/api/auth/me').catch(() => null);
+  if (currentUser) showApp();
+  else showAuth();
+}
+
+function showAuth() {
+  appRoot.classList.add('hidden');
+  fab.classList.add('hidden');
+  authScreen.classList.remove('hidden');
+  renderAuthForm('login');
+}
+
+function showApp() {
+  authScreen.classList.add('hidden');
+  appRoot.classList.remove('hidden');
+  document.getElementById('userArea').innerHTML = `
+    <span class="who">${esc(currentUser.name)}<small>${esc(currentUser.business_name || '')}</small></span>
+    <button class="btn secondary small" id="logoutBtn">Log out</button>`;
+  document.getElementById('logoutBtn').addEventListener('click', logout);
+  renderView();
+}
+
+let authMode = 'login';
+function renderAuthForm(mode) {
+  authMode = mode;
+  document.querySelectorAll('.auth-tab').forEach((t) =>
+    t.classList.toggle('active', t.dataset.auth === mode)
+  );
+  document.getElementById('authHint').textContent = '';
+  const body = document.getElementById('authBody');
+  if (mode === 'login') {
+    body.innerHTML = `
+      <div class="field"><label>Email</label><input id="a_email" type="email" /></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" /></div>
+      <button class="btn" id="a_submit">Log in</button>`;
+  } else {
+    body.innerHTML = `
+      <div class="field"><label>Your name</label><input id="a_name" /></div>
+      <div class="field"><label>Business name</label><input id="a_biz" /></div>
+      <div class="field"><label>Category</label><input id="a_cat" placeholder="e.g. Marketing" /></div>
+      <div class="field"><label>Email</label><input id="a_email" type="email" /></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" /></div>
+      <button class="btn" id="a_submit">Create account</button>`;
+  }
+  document.getElementById('a_submit').addEventListener('click', submitAuth);
+  body.querySelectorAll('input').forEach((inp) =>
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitAuth();
+    })
+  );
+}
+
+async function submitAuth() {
+  const hint = document.getElementById('authHint');
+  hint.className = 'auth-hint';
+  try {
+    if (authMode === 'login') {
+      currentUser = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: val('a_email'), password: val('a_password') }),
+      });
+    } else {
+      currentUser = await api('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: val('a_name'),
+          business_name: val('a_biz'),
+          category: val('a_cat'),
+          email: val('a_email'),
+          password: val('a_password'),
+        }),
+      });
+    }
+    showApp();
+  } catch (err) {
+    hint.className = 'auth-hint error';
+    hint.textContent = err.message;
+  }
+}
+
+async function logout() {
+  await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  currentUser = null;
+  document.getElementById('globalSearch').value = '';
+  showAuth();
+}
 
 // --- Views -----------------------------------------------------------------
 
@@ -73,8 +175,15 @@ async function renderListings(kind) {
 }
 
 function listingCard(l) {
+  const isOwner = currentUser && l.member_id === currentUser.id;
+  const ownerActions = isOwner
+    ? `<button class="btn secondary small toggle-status" data-id="${l.id}" data-status="${l.status === 'open' ? 'closed' : 'open'}">
+         Mark ${l.status === 'open' ? 'closed' : 'open'}
+       </button>
+       <button class="btn secondary small view-responses" data-id="${l.id}">View responses</button>`
+    : `<button class="btn small respond" data-id="${l.id}" data-title="${esc(l.title)}">Respond / Connect</button>`;
   return `
-    <div class="card">
+    <div class="card" id="listing-${l.id}">
       <div class="row">
         <h4>${esc(l.title)}</h4>
         <span class="badge ${l.kind}">${l.kind}</span>
@@ -82,25 +191,52 @@ function listingCard(l) {
       <div class="meta">${esc(l.member_name)} · ${esc(l.business_name || '')} · ${esc(l.group_name || 'No group')}</div>
       ${l.description ? `<p>${esc(l.description)}</p>` : ''}
       ${tagPills(l.tags)}
-      <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+      <div class="listing-actions">
         <span class="badge ${l.status === 'closed' ? 'closed' : l.kind}">${esc(l.status)}</span>
-        <button class="btn secondary small toggle-status" data-id="${l.id}" data-status="${l.status === 'open' ? 'closed' : 'open'}">
-          Mark ${l.status === 'open' ? 'closed' : 'open'}
-        </button>
+        ${l.response_count ? `<span class="count-badge">${l.response_count} response${l.response_count === 1 ? '' : 's'}</span>` : ''}
+        ${ownerActions}
       </div>
+      <div class="responses-slot"></div>
     </div>`;
 }
 
 function wireListingButtons() {
-  document.querySelectorAll('.toggle-status').forEach((btn) => {
+  document.querySelectorAll('.toggle-status').forEach((btn) =>
     btn.addEventListener('click', async () => {
       await api(`/api/listings/${btn.dataset.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status: btn.dataset.status }),
       });
       renderView();
-    });
-  });
+    })
+  );
+  document.querySelectorAll('.respond').forEach((btn) =>
+    btn.addEventListener('click', () => openRespond(btn.dataset.id, btn.dataset.title))
+  );
+  document.querySelectorAll('.view-responses').forEach((btn) =>
+    btn.addEventListener('click', () => loadResponses(btn.dataset.id))
+  );
+}
+
+async function loadResponses(listingId) {
+  const slot = document.querySelector(`#listing-${listingId} .responses-slot`);
+  const data = await api(`/api/listings/${listingId}/responses`);
+  if (!data.responses.length) {
+    slot.innerHTML = `<div class="responses"><div class="meta">No responses yet.</div></div>`;
+    return;
+  }
+  slot.innerHTML =
+    `<div class="responses">` +
+    data.responses
+      .map(
+        (r) => `
+      <div class="response">
+        <div class="who">${esc(r.member_name)} <small>· ${esc(r.business_name || '')} · ${esc(r.email)}</small></div>
+        <p>${esc(r.message)}</p>
+      </div>`
+      )
+      .join('') +
+    `</div>`;
 }
 
 async function renderGroups() {
@@ -133,7 +269,7 @@ async function renderMembers() {
             (m) => `
         <div class="card">
           <div class="row">
-            <h4>${esc(m.name)}</h4>
+            <h4>${esc(m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
             <span class="badge member">${esc(m.group_name || 'No group')}</span>
           </div>
           <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
@@ -141,10 +277,8 @@ async function renderMembers() {
         </div>`
           )
           .join('')
-      : `<div class="empty">No members yet. Tap ＋ to add one.</div>`);
+      : `<div class="empty">No members yet.</div>`);
 }
-
-// --- Cross-app search ------------------------------------------------------
 
 async function renderSearch(q) {
   const data = await api(`/api/search?q=${encodeURIComponent(q)}&kind=${searchKind}`);
@@ -179,6 +313,8 @@ async function renderSearch(q) {
 
 function renderView() {
   const q = document.getElementById('globalSearch').value.trim();
+  // The FAB makes no sense on the read-only members directory or in search.
+  fab.classList.toggle('hidden', currentView === 'members' || !!q);
   if (q) return renderSearch(q);
   if (currentView === 'feed') return renderFeed();
   if (currentView === 'asks') return renderListings('ask');
@@ -187,7 +323,7 @@ function renderView() {
   if (currentView === 'members') return renderMembers();
 }
 
-// --- Create forms (modal) --------------------------------------------------
+// --- Modal create forms ----------------------------------------------------
 
 const overlay = document.getElementById('modalOverlay');
 const modalBody = document.getElementById('modalBody');
@@ -203,21 +339,30 @@ overlay.addEventListener('click', (e) => {
   if (e.target === overlay) closeModal();
 });
 
-async function memberOptions() {
-  const members = await api('/api/members');
-  return members.map((m) => `<option value="${m.id}">${esc(m.name)} — ${esc(m.business_name || '')}</option>`).join('');
+// "Respond / Connect" modal — send a message to a listing owner.
+function openRespond(listingId, title) {
+  modalTitle.textContent = `Respond to “${title}”`;
+  modalBody.innerHTML = `
+    <div class="field"><label>Your message</label><textarea id="r_message" placeholder="Introduce yourself and how you can help / what you need…"></textarea></div>
+    <button class="btn" id="r_submit">Send response</button>`;
+  overlay.classList.remove('hidden');
+  document.getElementById('r_submit').addEventListener('click', async () => {
+    try {
+      await api(`/api/listings/${listingId}/responses`, {
+        method: 'POST',
+        body: JSON.stringify({ message: val('r_message') }),
+      });
+      closeModal();
+      renderView();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
-async function groupOptions() {
-  const groups = await api('/api/groups');
-  return (
-    `<option value="">No group</option>` +
-    groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('')
-  );
-}
-
-// Opens the create modal appropriate to the current view.
-async function openCreate() {
+// Opens the create modal appropriate to the current view. Posts and listings
+// use the logged-in member implicitly — no member selector needed.
+function openCreate() {
   let html = '';
   if (currentView === 'groups') {
     modalTitle.textContent = 'New group';
@@ -225,27 +370,15 @@ async function openCreate() {
       <div class="field"><label>Name</label><input id="f_name" /></div>
       <div class="field"><label>Description</label><textarea id="f_desc"></textarea></div>
       <button class="btn" id="f_submit">Create group</button>`;
-  } else if (currentView === 'members') {
-    modalTitle.textContent = 'New member';
-    html = `
-      <div class="field"><label>Name</label><input id="f_name" /></div>
-      <div class="field"><label>Business name</label><input id="f_biz" /></div>
-      <div class="field"><label>Category</label><input id="f_cat" placeholder="e.g. Accounting" /></div>
-      <div class="field"><label>Email</label><input id="f_email" /></div>
-      <div class="field"><label>Group</label><select id="f_group">${await groupOptions()}</select></div>
-      <button class="btn" id="f_submit">Add member</button>`;
   } else if (currentView === 'feed') {
     modalTitle.textContent = 'New post';
     html = `
-      <div class="field"><label>Member</label><select id="f_member">${await memberOptions()}</select></div>
       <div class="field"><label>What's on your mind?</label><textarea id="f_content"></textarea></div>
       <button class="btn" id="f_submit">Post</button>`;
   } else {
-    // asks or gives
     const kind = currentView === 'asks' ? 'ask' : 'give';
     modalTitle.textContent = kind === 'ask' ? 'New Ask' : 'New Give';
     html = `
-      <div class="field"><label>Member</label><select id="f_member">${await memberOptions()}</select></div>
       <div class="field"><label>Title</label><input id="f_title" placeholder="${kind === 'ask' ? 'What do you need?' : 'What can you offer?'}" /></div>
       <div class="field"><label>Description</label><textarea id="f_desc"></textarea></div>
       <div class="field"><label>Tags (comma separated)</label><input id="f_tags" placeholder="marketing, referrals" /></div>
@@ -261,36 +394,18 @@ async function submitCreate() {
     if (currentView === 'groups') {
       await api('/api/groups', {
         method: 'POST',
-        body: JSON.stringify({
-          name: val('f_name'),
-          description: val('f_desc'),
-        }),
-      });
-    } else if (currentView === 'members') {
-      await api('/api/members', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: val('f_name'),
-          business_name: val('f_biz'),
-          category: val('f_cat'),
-          email: val('f_email'),
-          group_id: val('f_group') || null,
-        }),
+        body: JSON.stringify({ name: val('f_name'), description: val('f_desc') }),
       });
     } else if (currentView === 'feed') {
       await api('/api/posts', {
         method: 'POST',
-        body: JSON.stringify({
-          member_id: val('f_member'),
-          content: val('f_content'),
-        }),
+        body: JSON.stringify({ content: val('f_content') }),
       });
     } else {
       const kind = currentView === 'asks' ? 'ask' : 'give';
       await api('/api/listings', {
         method: 'POST',
         body: JSON.stringify({
-          member_id: val('f_member'),
           kind,
           title: val('f_title'),
           description: val('f_desc'),
@@ -305,12 +420,11 @@ async function submitCreate() {
   }
 }
 
-const val = (id) => {
-  const el = document.getElementById(id);
-  return el ? el.value.trim() : '';
-};
-
 // --- Wiring ----------------------------------------------------------------
+
+document.querySelectorAll('.auth-tab').forEach((tab) =>
+  tab.addEventListener('click', () => renderAuthForm(tab.dataset.auth))
+);
 
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -336,7 +450,7 @@ document.getElementById('globalSearch').addEventListener('input', () => {
   searchTimer = setTimeout(renderView, 200); // debounce
 });
 
-document.getElementById('fab').addEventListener('click', openCreate);
+fab.addEventListener('click', openCreate);
 
-// Initial paint
-renderView();
+// Initial boot — decide auth vs app.
+boot();
