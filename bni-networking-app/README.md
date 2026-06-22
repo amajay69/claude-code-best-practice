@@ -47,6 +47,38 @@ search bar to search across everything.
 
 > Requires **Node 22.5+** (for the stable `node:sqlite` module).
 
+## Deploy to the cloud (Railway)
+
+Host it so you can use it from your phone or any device at a public URL. These
+steps are all doable from a browser — no terminal required.
+
+1. **New project** → in the [Railway](https://railway.app) dashboard choose
+   **Deploy from GitHub repo** and pick `claude-code-best-practice`.
+2. **Pick the branch** `claude/bni-networking-app-qoyr5h` in the service settings.
+3. **Set the Root Directory** to `bni-networking-app` (Settings → *Root
+   Directory*). This app is a subfolder, so Railway must build from there.
+   Build/start are auto-detected from `package.json` (`npm install` / `npm start`).
+4. **Add a Volume** for persistent data (Settings → *Volumes*) and mount it at
+   `/data`. Without a volume the SQLite file is wiped on every redeploy.
+5. **Set environment variables** (Settings → *Variables*):
+
+   | Variable        | Value         | Why |
+   |-----------------|---------------|-----|
+   | `BNI_DB_PATH`   | `/data/bni.db`| Store the database on the persistent volume |
+   | `NODE_ENV`      | `production`  | Enables the `Secure` session cookie (HTTPS) |
+   | `SEED_ON_EMPTY` | `true`        | Loads demo data on first boot only (optional) |
+
+6. **Generate a domain** (Settings → *Networking* → *Generate Domain*). Railway
+   sets `PORT` automatically and the app already binds to it. Open the URL on
+   your phone — done.
+
+> **Tip:** once you've created your own real account and data, remove the
+> `SEED_ON_EMPTY` variable so it never reseeds. (It only ever seeds an *empty*
+> database, but removing it makes the intent clear.)
+
+The same env vars work on Render, Fly.io, or any Node host — only the
+volume/disk setup differs per platform.
+
 ## Project structure
 
 ```
@@ -54,7 +86,9 @@ bni-networking-app/
 ├── server.js          # Express app + REST API + cross-app search
 ├── auth.js            # scrypt hashing, cookie sessions, auth middleware
 ├── db.js              # SQLite schema, migration & connection (node:sqlite)
-├── seed.js            # Demo data loader
+├── seed.js            # Demo data loader (seed / seedIfEmpty)
+├── railway.json       # Railway build & deploy config
+├── .nvmrc             # Pins Node 22 for the platform builder
 ├── public/
 │   ├── index.html     # SPA shell (auth screen + app)
 │   ├── styles.css     # Dark UI theme
