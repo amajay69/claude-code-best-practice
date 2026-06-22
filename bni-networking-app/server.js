@@ -8,12 +8,15 @@
 const express = require('express');
 const path = require('node:path');
 const { db, init } = require('./db');
+const auth = require('./auth');
 
 init();
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// Resolve req.member from the session cookie on every request (null if none).
+app.use(auth.attachMember);
 
 // --- Small helpers ---------------------------------------------------------
 
@@ -39,6 +42,61 @@ function required(body, fields) {
   }
 }
 
+// Explicit member columns — NEVER select m.* for members, since that would
+// leak password_hash to clients.
+const M_COLS = 'm.id, m.name, m.business_name, m.category, m.email, m.group_id, m.created_at';
+
+// --- Auth ------------------------------------------------------------------
+
+// Register creates a member account (the auth principal) and logs them in.
+app.post('/api/auth/register', wrap((req, res) => {
+  required(req.body, ['name', 'email', 'password']);
+  const { name, email, password, business_name = '', category = '', group_id = null } = req.body;
+  const existing = db.prepare('SELECT id FROM members WHERE lower(email) = lower(?)').get(email.trim());
+  if (existing) return res.status(409).json({ error: 'That email is already registered' });
+
+  const info = db.prepare(`
+    INSERT INTO members (name, business_name, category, email, password_hash, group_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    name.trim(), business_name.trim(), category.trim(), email.trim(),
+    auth.hashPassword(password), group_id || null
+  );
+  const token = auth.createSession(Number(info.lastInsertRowid));
+  auth.setSessionCookie(res, token);
+  res.status(201).json(publicMember(Number(info.lastInsertRowid)));
+}));
+
+app.post('/api/auth/login', wrap((req, res) => {
+  required(req.body, ['email', 'password']);
+  const row = db.prepare('SELECT * FROM members WHERE lower(email) = lower(?)').get(req.body.email.trim());
+  if (!row || !auth.verifyPassword(req.body.password, row.password_hash)) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  const token = auth.createSession(row.id);
+  auth.setSessionCookie(res, token);
+  res.json(publicMember(row.id));
+}));
+
+app.post('/api/auth/logout', wrap((req, res) => {
+  auth.destroySession(req.sessionToken);
+  auth.clearSessionCookie(res);
+  res.json({ ok: true });
+}));
+
+app.get('/api/auth/me', wrap((req, res) => {
+  res.json(req.member || null);
+}));
+
+// Returns a member without the password hash — safe to send to clients.
+function publicMember(id) {
+  return db.prepare(`
+    SELECT m.id, m.name, m.business_name, m.category, m.email, m.group_id, g.name AS group_name
+    FROM members m LEFT JOIN groups g ON g.id = m.group_id
+    WHERE m.id = ?
+  `).get(id);
+}
+
 // --- Groups ----------------------------------------------------------------
 
 app.get('/api/groups', wrap((req, res) => {
@@ -52,7 +110,7 @@ app.get('/api/groups', wrap((req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/groups', wrap((req, res) => {
+app.post('/api/groups', auth.requireAuth, wrap((req, res) => {
   required(req.body, ['name']);
   const { name, description = '' } = req.body;
   const info = db
@@ -65,7 +123,7 @@ app.get('/api/groups/:id', wrap((req, res) => {
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!group) return res.status(404).json({ error: 'Group not found' });
   group.members = db
-    .prepare('SELECT * FROM members WHERE group_id = ? ORDER BY name')
+    .prepare(`SELECT ${M_COLS} FROM members m WHERE m.group_id = ? ORDER BY m.name`)
     .all(group.id);
   res.json(group);
 }));
@@ -74,7 +132,7 @@ app.get('/api/groups/:id', wrap((req, res) => {
 
 app.get('/api/members', wrap((req, res) => {
   const rows = db.prepare(`
-    SELECT m.*, g.name AS group_name
+    SELECT ${M_COLS}, g.name AS group_name
     FROM members m
     LEFT JOIN groups g ON g.id = m.group_id
     ORDER BY m.name
@@ -82,19 +140,9 @@ app.get('/api/members', wrap((req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/members', wrap((req, res) => {
-  required(req.body, ['name']);
-  const { name, business_name = '', category = '', email = '', group_id = null } = req.body;
-  const info = db.prepare(`
-    INSERT INTO members (name, business_name, category, email, group_id)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(name.trim(), business_name.trim(), category.trim(), email.trim(), group_id || null);
-  res.status(201).json(db.prepare('SELECT * FROM members WHERE id = ?').get(info.lastInsertRowid));
-}));
-
 app.get('/api/members/:id', wrap((req, res) => {
   const member = db.prepare(`
-    SELECT m.*, g.name AS group_name
+    SELECT ${M_COLS}, g.name AS group_name
     FROM members m
     LEFT JOIN groups g ON g.id = m.group_id
     WHERE m.id = ?
@@ -122,12 +170,11 @@ app.get('/api/posts', wrap((req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/posts', wrap((req, res) => {
-  required(req.body, ['member_id', 'content']);
-  const { member_id, content } = req.body;
+app.post('/api/posts', auth.requireAuth, wrap((req, res) => {
+  required(req.body, ['content']);
   const info = db
     .prepare('INSERT INTO posts (member_id, content) VALUES (?, ?)')
-    .run(member_id, content.trim());
+    .run(req.member.id, req.body.content.trim());
   res.status(201).json(db.prepare('SELECT * FROM posts WHERE id = ?').get(info.lastInsertRowid));
 }));
 
@@ -138,7 +185,8 @@ app.get('/api/listings', wrap((req, res) => {
   const clause = kind ? 'WHERE l.kind = ?' : '';
   const args = kind ? [kind] : [];
   const rows = db.prepare(`
-    SELECT l.*, m.name AS member_name, m.business_name, g.name AS group_name
+    SELECT l.*, m.name AS member_name, m.business_name, g.name AS group_name,
+           (SELECT COUNT(*) FROM responses r WHERE r.listing_id = l.id) AS response_count
     FROM listings l
     JOIN members m ON m.id = l.member_id
     LEFT JOIN groups g ON g.id = m.group_id
@@ -148,29 +196,69 @@ app.get('/api/listings', wrap((req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/listings', wrap((req, res) => {
-  required(req.body, ['member_id', 'kind', 'title']);
-  const { member_id, kind, title, description = '', tags = '' } = req.body;
+app.post('/api/listings', auth.requireAuth, wrap((req, res) => {
+  required(req.body, ['kind', 'title']);
+  const { kind, title, description = '', tags = '' } = req.body;
   if (!['ask', 'give'].includes(kind)) {
     return res.status(400).json({ error: "kind must be 'ask' or 'give'" });
   }
   const info = db.prepare(`
     INSERT INTO listings (member_id, kind, title, description, tags)
     VALUES (?, ?, ?, ?, ?)
-  `).run(member_id, kind, title.trim(), description.trim(), tags.trim());
+  `).run(req.member.id, kind, title.trim(), description.trim(), tags.trim());
   res.status(201).json(db.prepare('SELECT * FROM listings WHERE id = ?').get(info.lastInsertRowid));
 }));
 
-app.patch('/api/listings/:id', wrap((req, res) => {
+app.patch('/api/listings/:id', auth.requireAuth, wrap((req, res) => {
   const { status } = req.body;
   if (!['open', 'closed'].includes(status)) {
     return res.status(400).json({ error: "status must be 'open' or 'closed'" });
   }
-  const info = db
-    .prepare('UPDATE listings SET status = ? WHERE id = ?')
-    .run(status, req.params.id);
-  if (info.changes === 0) return res.status(404).json({ error: 'Listing not found' });
+  const listing = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id);
+  if (!listing) return res.status(404).json({ error: 'Listing not found' });
+  // Only the owner can open/close their own listing.
+  if (listing.member_id !== req.member.id) {
+    return res.status(403).json({ error: 'You can only change your own listings' });
+  }
+  db.prepare('UPDATE listings SET status = ? WHERE id = ?').run(status, req.params.id);
   res.json(db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id));
+}));
+
+// --- Responses (the "Connect" action) --------------------------------------
+
+// A logged-in member responds to someone's Ask/Give with a message. The listing
+// owner reads these to follow up — this is the core networking interaction.
+app.post('/api/listings/:id/responses', auth.requireAuth, wrap((req, res) => {
+  required(req.body, ['message']);
+  const listing = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id);
+  if (!listing) return res.status(404).json({ error: 'Listing not found' });
+  const info = db.prepare(`
+    INSERT INTO responses (listing_id, member_id, message) VALUES (?, ?, ?)
+  `).run(listing.id, req.member.id, req.body.message.trim());
+  res.status(201).json(db.prepare('SELECT * FROM responses WHERE id = ?').get(info.lastInsertRowid));
+}));
+
+// List responses on a listing. Visible to the listing owner (to follow up) and
+// to anyone who already responded (to see the thread they're part of).
+app.get('/api/listings/:id/responses', auth.requireAuth, wrap((req, res) => {
+  const listing = db.prepare('SELECT * FROM listings WHERE id = ?').get(req.params.id);
+  if (!listing) return res.status(404).json({ error: 'Listing not found' });
+
+  const isOwner = listing.member_id === req.member.id;
+  const hasResponded = db
+    .prepare('SELECT 1 FROM responses WHERE listing_id = ? AND member_id = ? LIMIT 1')
+    .get(listing.id, req.member.id);
+  if (!isOwner && !hasResponded) {
+    return res.status(403).json({ error: 'Only the listing owner can view responses' });
+  }
+  const rows = db.prepare(`
+    SELECT r.*, m.name AS member_name, m.business_name, m.email
+    FROM responses r
+    JOIN members m ON m.id = r.member_id
+    WHERE r.listing_id = ?
+    ORDER BY r.created_at
+  `).all(listing.id);
+  res.json({ owner: isOwner, responses: rows });
 }));
 
 // --- Cross-app search ------------------------------------------------------
