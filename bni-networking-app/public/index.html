@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BizConnect — Networking for Business Groups</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🤝 BizConnect</div>
+    <div class="search">
+      <input id="globalSearch" type="search" placeholder="Search members, posts, asks &amp; gives…" autocomplete="off" />
+      <div class="search-filters" id="searchFilters">
+        <button class="chip active" data-kind="">All</button>
+        <button class="chip" data-kind="member">Members</button>
+        <button class="chip" data-kind="post">Posts</button>
+        <button class="chip" data-kind="ask">Asks</button>
+        <button class="chip" data-kind="give">Gives</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="feed">Feed</button>
+    <button class="tab" data-view="asks">Asks</button>
+    <button class="tab" data-view="gives">Gives</button>
+    <button class="tab" data-view="groups">Groups</button>
+    <button class="tab" data-view="members">Members</button>
+  </nav>
+
+  <main id="app"></main>
+
+  <!-- Modal for create forms -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">New</h3>
+        <button class="icon-btn" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <button class="fab" id="fab" title="Create">＋</button>
+
+  <script src="app.js"></script>
+</body>
+</html>
