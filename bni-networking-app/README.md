@@ -52,6 +52,37 @@ search bar to search across everything.
 Host it so you can use it from your phone or any device at a public URL. These
 steps are all doable from a browser — no terminal required.
 
+### One-tap deploy
+
+Once you've published this app as a Railway template (steps below), drop your
+template code into this button and anyone can deploy it in a single tap:
+
+```markdown
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/YOUR_TEMPLATE_CODE?utm_medium=integration&utm_source=button&utm_campaign=bizconnect)
+```
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/YOUR_TEMPLATE_CODE)
+
+> Replace `YOUR_TEMPLATE_CODE` with the code Railway gives you when you publish.
+
+**Publish your template (≈2 minutes, captures root dir + volume + env vars so
+the button is truly one-tap):**
+
+1. Deploy the app once using the manual steps below.
+2. In your Railway project, open the service → **⋯** menu → **Create Template**
+   (or go to <https://railway.com/compose>).
+3. Confirm the captured settings: **Root Directory** `bni-networking-app`, the
+   **/data** volume, and the variables `BNI_DB_PATH`, `NODE_ENV`,
+   `SEED_ON_EMPTY`.
+4. **Publish** → Railway gives you a URL like
+   `https://railway.com/new/template/abc123`. The part after `/template/` is
+   your code — paste it into the button above.
+
+That published button captures everything, so a one-tap deploy needs **zero**
+manual configuration. The manual steps below are the first-time path.
+
+### Manual deploy
+
 1. **New project** → in the [Railway](https://railway.app) dashboard choose
    **Deploy from GitHub repo** and pick `claude-code-best-practice`.
 2. **Pick the branch** `claude/bni-networking-app-qoyr5h` in the service settings.
