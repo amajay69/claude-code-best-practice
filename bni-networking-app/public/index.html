@@ -7,29 +7,47 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">🤝 BizConnect</div>
-    <div class="search">
-      <input id="globalSearch" type="search" placeholder="Search members, posts, asks &amp; gives…" autocomplete="off" />
-      <div class="search-filters" id="searchFilters">
-        <button class="chip active" data-kind="">All</button>
-        <button class="chip" data-kind="member">Members</button>
-        <button class="chip" data-kind="post">Posts</button>
-        <button class="chip" data-kind="ask">Asks</button>
-        <button class="chip" data-kind="give">Gives</button>
+  <!-- Auth screen (shown when logged out) -->
+  <section class="auth-screen" id="authScreen">
+    <div class="auth-card">
+      <div class="brand big">🤝 BizConnect</div>
+      <p class="auth-tag">Networking for business groups — share, ask, give, connect.</p>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-auth="login">Log in</button>
+        <button class="auth-tab" data-auth="register">Sign up</button>
       </div>
+      <div id="authBody"></div>
+      <p class="auth-hint" id="authHint"></p>
     </div>
-  </header>
+  </section>
 
-  <nav class="tabs">
-    <button class="tab active" data-view="feed">Feed</button>
-    <button class="tab" data-view="asks">Asks</button>
-    <button class="tab" data-view="gives">Gives</button>
-    <button class="tab" data-view="groups">Groups</button>
-    <button class="tab" data-view="members">Members</button>
-  </nav>
+  <!-- Main app (shown when logged in) -->
+  <div id="appRoot" class="hidden">
+    <header class="topbar">
+      <div class="brand">🤝 BizConnect</div>
+      <div class="search">
+        <input id="globalSearch" type="search" placeholder="Search members, posts, asks &amp; gives…" autocomplete="off" />
+        <div class="search-filters" id="searchFilters">
+          <button class="chip active" data-kind="">All</button>
+          <button class="chip" data-kind="member">Members</button>
+          <button class="chip" data-kind="post">Posts</button>
+          <button class="chip" data-kind="ask">Asks</button>
+          <button class="chip" data-kind="give">Gives</button>
+        </div>
+      </div>
+      <div class="user-area" id="userArea"></div>
+    </header>
 
-  <main id="app"></main>
+    <nav class="tabs">
+      <button class="tab active" data-view="feed">Feed</button>
+      <button class="tab" data-view="asks">Asks</button>
+      <button class="tab" data-view="gives">Gives</button>
+      <button class="tab" data-view="groups">Groups</button>
+      <button class="tab" data-view="members">Members</button>
+    </nav>
+
+    <main id="app"></main>
+  </div>
 
   <!-- Modal for create forms -->
   <div class="modal-overlay hidden" id="modalOverlay">
@@ -42,7 +60,7 @@
     </div>
   </div>
 
-  <button class="fab" id="fab" title="Create">＋</button>
+  <button class="fab hidden" id="fab" title="Create">＋</button>
 
   <script src="app.js"></script>
 </body>
