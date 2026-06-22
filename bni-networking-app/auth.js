@@ -75,13 +75,16 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// Add the Secure attribute in production (served over HTTPS on Railway/Render).
+const SECURE = process.env.NODE_ENV === 'production' ? ' Secure;' : '';
+
 function setSessionCookie(res, token) {
   // httpOnly so JS can't read it; SameSite=Lax is a sensible default for an MVP.
-  res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly;${SECURE} SameSite=Lax; Path=/; Max-Age=604800`);
 }
 
 function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.setHeader('Set-Cookie', `${COOKIE}=;${SECURE} HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
 }
 
 module.exports = {
