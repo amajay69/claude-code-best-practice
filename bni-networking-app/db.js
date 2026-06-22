@@ -7,8 +7,14 @@
 // which makes the app trivially portable and easy to reset.
 const { DatabaseSync } = require('node:sqlite');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const DB_PATH = process.env.BNI_DB_PATH || path.join(__dirname, 'bni.db');
+
+// Ensure the database's directory exists. On cloud hosts BNI_DB_PATH often
+// points at a mounted volume (e.g. /data/bni.db); creating it up front means a
+// missing/empty volume mount degrades gracefully instead of crashing on boot.
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 
