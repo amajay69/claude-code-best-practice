@@ -355,9 +355,18 @@ app.get('/api/search', wrap((req, res) => {
 
 // --- Boot ------------------------------------------------------------------
 
+// First-deploy convenience: if SEED_ON_EMPTY=true and the database has no
+// members yet, load the demo data. Never wipes existing data.
+if (process.env.SEED_ON_EMPTY === 'true') {
+  const { seedIfEmpty } = require('./seed');
+  const counts = seedIfEmpty();
+  if (counts) console.log(`Seeded demo data into empty database (${counts.members} members).`);
+}
+
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
-  app.listen(PORT, () => {
+  // Bind to 0.0.0.0 so cloud platforms (Railway, Render, etc.) can route to it.
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`BNI networking app running at http://localhost:${PORT}`);
   });
 }
