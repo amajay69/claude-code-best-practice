@@ -11,6 +11,9 @@
   "keywords": ["networking", "bni", "referrals", "express", "sqlite"],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=22.11.0"
+  },
   "dependencies": {
     "express": "^4.22.2"
   }
