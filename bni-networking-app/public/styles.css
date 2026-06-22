@@ -192,3 +192,64 @@ main { padding: 20px 24px 100px; max-width: 980px; margin: 0 auto; }
 .hidden { display: none !important; }
 
 .search-result .type-line { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* User area in top bar */
+.user-area { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.user-area .who { font-size: 14px; }
+.user-area .who small { display: block; color: var(--muted); font-size: 12px; }
+
+/* Auth screen */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.auth-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+.brand.big { font-size: 30px; }
+.auth-tag { color: var(--muted); margin: 8px 0 22px; }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+.auth-tab {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 9px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.auth-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.auth-card .field { text-align: left; }
+.auth-card .btn { width: 100%; margin-top: 6px; }
+.auth-hint { color: var(--muted); font-size: 13px; margin-top: 14px; min-height: 18px; }
+.auth-hint.error { color: #ff7a7a; }
+
+/* Responses (Connect) */
+.responses { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.response {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.response .who { font-size: 13px; font-weight: 600; }
+.response .who small { color: var(--muted); font-weight: 400; }
+.response p { margin: 4px 0 0; font-size: 14px; }
+.listing-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.count-badge {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
