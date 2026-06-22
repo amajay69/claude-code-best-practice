@@ -4,15 +4,20 @@
 // Asks/Gives so the app is immediately explorable. Run with: `npm run seed`.
 // Safe to re-run: it clears existing rows first.
 const { db, init } = require('./db');
+const { hashPassword } = require('./auth');
 
 init();
 
 console.log('Clearing existing data...');
-db.exec('DELETE FROM listings; DELETE FROM posts; DELETE FROM members; DELETE FROM groups;');
+db.exec('DELETE FROM responses; DELETE FROM sessions; DELETE FROM listings; DELETE FROM posts; DELETE FROM members; DELETE FROM groups;');
+
+// All demo members share this password so you can log in as any of them.
+const DEMO_PASSWORD = 'password123';
+const demoHash = hashPassword(DEMO_PASSWORD);
 
 const insertGroup = db.prepare('INSERT INTO groups (name, description) VALUES (?, ?)');
 const insertMember = db.prepare(
-  'INSERT INTO members (name, business_name, category, email, group_id) VALUES (?, ?, ?, ?, ?)'
+  'INSERT INTO members (name, business_name, category, email, password_hash, group_id) VALUES (?, ?, ?, ?, ?, ?)'
 );
 const insertPost = db.prepare('INSERT INTO posts (member_id, content) VALUES (?, ?)');
 const insertListing = db.prepare(
@@ -33,7 +38,12 @@ const members = [
   ['Sofia Ramos', 'Ramos Marketing', 'Marketing', 'sofia@ramosmktg.com', groupIds[1]],
   ['Tom Fisher', 'Fisher Plumbing', 'Trades', 'tom@fisherplumbing.com', groupIds[1]],
 ];
-const memberIds = members.map((m) => Number(insertMember.run(...m).lastInsertRowid));
+// Each row is [name, business_name, category, email, group_id]; splice the
+// shared demo password hash in before group_id to match the insert columns.
+const memberIds = members.map((m) => {
+  const [name, biz, cat, email, groupId] = m;
+  return Number(insertMember.run(name, biz, cat, email, demoHash, groupId).lastInsertRowid);
+});
 
 const posts = [
   [memberIds[0], 'Just launched a new e-commerce site for a local bakery — happy to share results!'],
@@ -52,8 +62,21 @@ const listings = [
   [memberIds[4], 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros.', 'marketing,saas,referrals'],
   [memberIds[5], 'give', 'Discounted plumbing for member offices', '15% off commercial plumbing for anyone in the network.', 'plumbing,trades,office'],
 ];
-listings.forEach((l) => insertListing.run(...l));
+const listingIds = listings.map((l) => Number(insertListing.run(...l).lastInsertRowid));
+
+// A few responses so the "Connect" feature has data on first run.
+// (Daniel the accountant replies to Asha's "need an accountant" ask, etc.)
+const insertResponse = db.prepare(
+  'INSERT INTO responses (listing_id, member_id, message) VALUES (?, ?, ?)'
+);
+const responses = [
+  [listingIds[0], memberIds[1], "Hi Asha — I specialize in agency & freelancer taxes. Happy to help!"],
+  [listingIds[3], memberIds[4], "Marketing is our thing — we'd love to support your showroom launch."],
+];
+responses.forEach((r) => insertResponse.run(...r));
 
 console.log(
-  `Seeded ${groups.length} groups, ${members.length} members, ${posts.length} posts, ${listings.length} listings.`
+  `Seeded ${groups.length} groups, ${members.length} members, ${posts.length} posts, ` +
+  `${listings.length} listings, ${responses.length} responses.`
 );
+console.log(`Demo login: any member email (e.g. asha@vermaweb.com) / password "${DEMO_PASSWORD}"`);
