@@ -1,0 +1,17 @@
+{
+  "name": "bni-networking-app",
+  "version": "1.0.0",
+  "description": "BizConnect — a BNI-style networking app where business groups share posts, post Asks & Gives, and search across the whole network.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "test": "node test/smoke.test.js"
+  },
+  "keywords": ["networking", "bni", "referrals", "express", "sqlite"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}
