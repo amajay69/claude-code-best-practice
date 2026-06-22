@@ -29,12 +29,15 @@ function init() {
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Members double as user accounts: email is the login, password_hash holds
+    -- the scrypt hash (nullable so non-auth seed/admin members can still exist).
     CREATE TABLE IF NOT EXISTS members (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       name          TEXT NOT NULL,
       business_name TEXT NOT NULL DEFAULT '',
       category      TEXT NOT NULL DEFAULT '',
       email         TEXT NOT NULL DEFAULT '',
+      password_hash TEXT,
       group_id      INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -61,10 +64,40 @@ function init() {
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_members_group  ON members(group_id);
-    CREATE INDEX IF NOT EXISTS idx_listings_member ON listings(member_id);
-    CREATE INDEX IF NOT EXISTS idx_listings_kind   ON listings(kind);
+    -- "Connect" feature: a member responds to someone's Ask/Give with a message.
+    -- The listing owner reads these to follow up — this is the networking action.
+    CREATE TABLE IF NOT EXISTS responses (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      listing_id  INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+      member_id   INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      message     TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Server-side sessions: a random token maps to the logged-in member.
+    CREATE TABLE IF NOT EXISTS sessions (
+      token      TEXT PRIMARY KEY,
+      member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_members_group     ON members(group_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_member   ON listings(member_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_kind     ON listings(kind);
+    CREATE INDEX IF NOT EXISTS idx_responses_listing ON responses(listing_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_member   ON sessions(member_id);
   `);
+
+  migrate();
+}
+
+// Lightweight forward migration so databases created before auth existed gain
+// the password_hash column without being wiped. Idempotent.
+function migrate() {
+  const cols = db.prepare("PRAGMA table_info('members')").all();
+  if (!cols.some((c) => c.name === 'password_hash')) {
+    db.exec('ALTER TABLE members ADD COLUMN password_hash TEXT;');
+  }
 }
 
 module.exports = { db, init, DB_PATH };
