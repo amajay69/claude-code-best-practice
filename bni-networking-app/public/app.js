@@ -11,8 +11,10 @@ const authScreen = document.getElementById('authScreen');
 const fab = document.getElementById('fab');
 
 let currentUser = null;
+let currentSpace = 'network'; // 'network' (community) | 'crm' (private contacts)
 let currentView = 'matches';
 let profileMemberId = null; // when set, the profile view overrides the tab view
+let contactDetailId = null; // when set (in CRM), the contact detail view shows
 let searchKind = '';
 let searchTimer = null;
 
@@ -54,12 +56,28 @@ const val = (id) => {
 // Clickable member name — anywhere a name appears it opens that profile.
 const plink = (mid, name) => `<a href="#" class="plink" data-mid="${mid}">${esc(name)}</a>`;
 
-// One delegated listener handles every profile link/button, so views never
-// need to re-wire name clicks after each render.
-app.addEventListener('click', (e) => {
+// One delegated listener handles profile links and "save to contacts" buttons,
+// so views never need to re-wire these after each render.
+app.addEventListener('click', async (e) => {
+  const add = e.target.closest('.add-contact');
+  if (add) {
+    try {
+      await api('/api/contacts', {
+        method: 'POST',
+        body: JSON.stringify({ member_id: Number(add.dataset.mid) }),
+      });
+      add.textContent = '✓ In your contacts';
+      add.disabled = true;
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
   const el = e.target.closest('.plink, .plink-btn');
   if (!el) return;
   e.preventDefault();
+  currentSpace = 'network'; // profiles live in the network space
+  syncSpaceUI();
   profileMemberId = Number(el.dataset.mid);
   renderView();
 });
@@ -150,12 +168,102 @@ async function submitAuth() {
 async function logout() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   currentUser = null;
+  currentSpace = 'network';
+  currentView = 'matches';
   profileMemberId = null;
+  contactDetailId = null;
   document.getElementById('globalSearch').value = '';
+  syncSpaceUI();
   showAuth();
 }
 
-// --- Views -----------------------------------------------------------------
+// --- Views: My CRM -----------------------------------------------------------
+
+// Private contact book. Contacts linked to network members carry a badge;
+// external contacts (not on the app) are fully editable records.
+async function renderContacts() {
+  const rows = await api('/api/contacts');
+  const today = new Date().toISOString().slice(0, 10);
+  app.innerHTML =
+    `<div class="section-title">My contacts — private to you</div>` +
+    (rows.length
+      ? rows.map((c) => `
+        <div class="card contact-card" data-cid="${c.id}" style="cursor:pointer">
+          <div class="row">
+            <h4>${esc(c.name)}</h4>
+            <span class="badge ${c.linked ? 'member' : 'post'}">${c.linked ? 'in network' : 'external'}</span>
+          </div>
+          <div class="meta">${esc(c.business_name || '—')}${c.category ? ' · ' + esc(c.category) : ''}</div>
+          ${c.notes ? `<p>${esc(c.notes)}</p>` : ''}
+          <div class="listing-actions">
+            ${c.follow_up ? `<span class="follow-chip${c.follow_up < today ? ' overdue' : ''}">Follow up: ${esc(c.follow_up)}</span>` : ''}
+            ${c.email ? `<span class="count-badge">${esc(c.email)}</span>` : ''}
+            ${c.phone ? `<span class="count-badge">${esc(c.phone)}</span>` : ''}
+          </div>
+        </div>`).join('')
+      : `<div class="empty">No contacts yet. Tap ＋ to add someone, or search the network above and save people here.</div>`);
+  document.querySelectorAll('.contact-card').forEach((card) =>
+    card.addEventListener('click', () => {
+      contactDetailId = Number(card.dataset.cid);
+      renderView();
+    }));
+}
+
+// Editable contact record: notes, follow-up date, details. Linked contacts get
+// a jump to the live network profile.
+async function renderContactDetail(cid) {
+  const rows = await api('/api/contacts');
+  const c = rows.find((x) => x.id === cid);
+  if (!c) { contactDetailId = null; return renderView(); }
+  const field = (label, id, value, type = 'text') =>
+    `<div class="field"><label>${label}</label><input id="${id}" type="${type}" value="${esc(value || '')}" /></div>`;
+  app.innerHTML = `
+    <button class="btn secondary small" id="backBtn">← Back to contacts</button>
+    <div class="card" style="margin-top:12px">
+      <div class="row">
+        <h4 style="font-size:20px">${esc(c.name)}</h4>
+        <span class="badge ${c.linked ? 'member' : 'post'}">${c.linked ? 'in network' : 'external'}</span>
+      </div>
+      ${c.linked ? `<div class="listing-actions"><button class="btn secondary small plink-btn" data-mid="${c.linked_member_id}">View live network profile →</button></div>` : ''}
+      <div style="margin-top:14px">
+        ${field('Name', 'c_name', c.name)}
+        ${field('Business', 'c_biz', c.business_name)}
+        ${field('Category', 'c_cat', c.category)}
+        ${field('Email', 'c_email', c.email, 'email')}
+        ${field('Phone', 'c_phone', c.phone)}
+        <div class="field"><label>Private notes (only you can see these)</label><textarea id="c_notes">${esc(c.notes || '')}</textarea></div>
+        ${field('Follow up on', 'c_follow', c.follow_up, 'date')}
+        <div class="listing-actions">
+          <button class="btn" id="saveContact">Save</button>
+          <button class="btn secondary small" id="deleteContact">Remove contact</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('backBtn').addEventListener('click', () => {
+    contactDetailId = null;
+    renderView();
+  });
+  document.getElementById('saveContact').addEventListener('click', async () => {
+    await api(`/api/contacts/${c.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: val('c_name'), business_name: val('c_biz'), category: val('c_cat'),
+        email: val('c_email'), phone: val('c_phone'), notes: val('c_notes'),
+        follow_up: val('c_follow') || null,
+      }),
+    });
+    contactDetailId = null;
+    renderView();
+  });
+  document.getElementById('deleteContact').addEventListener('click', async () => {
+    if (!confirm(`Remove ${c.name} from your contacts?`)) return;
+    await api(`/api/contacts/${c.id}`, { method: 'DELETE' });
+    contactDetailId = null;
+    renderView();
+  });
+}
+
+// --- Views: Network ------------------------------------------------------------
 
 // Home screen: who should you talk to today? Two sections driven by the
 // matching engine — their Gives that answer your Asks, and vice versa.
@@ -212,6 +320,7 @@ async function renderProfile(mid) {
       </div>
       <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
       ${m.email ? `<div class="meta">${esc(m.email)}</div>` : ''}
+      ${!isMe ? `<div class="listing-actions"><button class="btn secondary small add-contact" data-mid="${m.id}">＋ Add to My Contacts</button></div>` : ''}
     </div>
     <div class="section-title">Open asks &amp; gives</div>` +
     (open.length ? open.map((l) => listingCard(augment(l))).join('') : '<div class="empty">Nothing open right now.</div>') +
@@ -392,6 +501,9 @@ async function renderSearch(q) {
           ${who ? `<div class="meta">${who}</div>` : ''}
           ${tagPills(r.tags)}
           <div class="type-line">${esc(r.group_name || '')}</div>
+          ${r.type === 'member' && r.id !== currentUser.id
+            ? `<div class="listing-actions"><button class="btn secondary small add-contact" data-mid="${r.id}">＋ Save to My Contacts</button></div>`
+            : ''}
         </div>`;
       })
       .join('');
@@ -401,17 +513,33 @@ async function renderSearch(q) {
 
 function renderView() {
   const q = document.getElementById('globalSearch').value.trim();
-  // The FAB only applies where "create" has an obvious meaning.
-  fab.classList.toggle('hidden',
-    !!q || profileMemberId !== null || currentView === 'members' || currentView === 'matches');
-  if (q) return renderSearch(q);
+  // The FAB only applies where "create" has an obvious meaning. In the CRM it
+  // means "add a contact".
+  const fabHidden = !!q || profileMemberId !== null ||
+    (currentSpace === 'crm'
+      ? contactDetailId !== null
+      : currentView === 'members' || currentView === 'matches');
+  fab.classList.toggle('hidden', fabHidden);
+  if (q) return renderSearch(q); // network-wide search from either space
   if (profileMemberId !== null) return renderProfile(profileMemberId);
+  if (currentSpace === 'crm') {
+    if (contactDetailId !== null) return renderContactDetail(contactDetailId);
+    return renderContacts();
+  }
   if (currentView === 'matches') return renderMatches();
   if (currentView === 'feed') return renderFeed();
   if (currentView === 'asks') return renderListings('ask');
   if (currentView === 'gives') return renderListings('give');
   if (currentView === 'groups') return renderGroups();
   if (currentView === 'members') return renderMembers();
+}
+
+// Keep the switcher buttons and tab bars in sync with currentSpace.
+function syncSpaceUI() {
+  document.querySelectorAll('.space').forEach((b) =>
+    b.classList.toggle('active', b.dataset.space === currentSpace));
+  document.getElementById('networkTabs').classList.toggle('hidden', currentSpace !== 'network');
+  document.getElementById('crmTabs').classList.toggle('hidden', currentSpace !== 'crm');
 }
 
 // --- Modal create forms ----------------------------------------------------
@@ -455,6 +583,22 @@ function openRespond(listingId, title) {
 // use the logged-in member implicitly — no member selector needed.
 function openCreate() {
   let html = '';
+  if (currentSpace === 'crm') {
+    modalTitle.textContent = 'New contact';
+    html = `
+      <div class="field"><label>Name</label><input id="f_name" /></div>
+      <div class="field"><label>Business name</label><input id="f_biz" /></div>
+      <div class="field"><label>Category</label><input id="f_cat" placeholder="e.g. Print &amp; Signage" /></div>
+      <div class="field"><label>Email</label><input id="f_email" type="email" /></div>
+      <div class="field"><label>Phone</label><input id="f_phone" /></div>
+      <div class="field"><label>Private notes</label><textarea id="f_notes"></textarea></div>
+      <div class="field"><label>Follow up on</label><input id="f_follow" type="date" /></div>
+      <button class="btn" id="f_submit">Add contact</button>`;
+    modalBody.innerHTML = html;
+    overlay.classList.remove('hidden');
+    document.getElementById('f_submit').addEventListener('click', submitCreate);
+    return;
+  }
   if (currentView === 'groups') {
     modalTitle.textContent = 'New group';
     html = `
@@ -482,6 +626,19 @@ function openCreate() {
 
 async function submitCreate() {
   try {
+    if (currentSpace === 'crm') {
+      await api('/api/contacts', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: val('f_name'), business_name: val('f_biz'), category: val('f_cat'),
+          email: val('f_email'), phone: val('f_phone'), notes: val('f_notes'),
+          follow_up: val('f_follow') || null,
+        }),
+      });
+      closeModal();
+      renderView();
+      return;
+    }
     if (currentView === 'groups') {
       await api('/api/groups', {
         method: 'POST',
@@ -517,12 +674,25 @@ document.querySelectorAll('.auth-tab').forEach((tab) =>
   tab.addEventListener('click', () => renderAuthForm(tab.dataset.auth))
 );
 
+document.querySelectorAll('.space').forEach((btn) =>
+  btn.addEventListener('click', () => {
+    currentSpace = btn.dataset.space;
+    profileMemberId = null;
+    contactDetailId = null;
+    if (currentSpace === 'network') currentView = 'matches';
+    document.getElementById('globalSearch').value = '';
+    syncSpaceUI();
+    renderView();
+  }));
+
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    // Scope active state to the tab bar this button lives in.
+    tab.closest('.tabs').querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     tab.classList.add('active');
     currentView = tab.dataset.view;
     profileMemberId = null;
+    contactDetailId = null;
     document.getElementById('globalSearch').value = '';
     renderView();
   });
