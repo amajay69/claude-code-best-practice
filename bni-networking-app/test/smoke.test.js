@@ -84,6 +84,17 @@ function request(server, method, urlPath, body, jar) {
     const search = await request(server, 'GET', '/api/search?q=marketing');
     assert.ok(search.body.count >= 2, 'search should find post + ask');
 
+    // Matching: Dan posts a Give sharing the 'marketing' tag with Asha's Ask,
+    // so Asha's matches should list it under they_can_help.
+    const give = await request(server, 'POST', '/api/listings', {
+      kind: 'give', title: 'Brand marketing help', tags: 'marketing,branding',
+    }, dan);
+    const matches = await request(server, 'GET', '/api/matches', null, asha);
+    assert.ok(
+      matches.body.matches.some((m) => m.direction === 'they_can_help' && m.their_listing.id === give.body.id),
+      'ask should match give via shared tag'
+    );
+
     // Ownership: Dan cannot close Asha's listing.
     const forbidden = await request(server, 'PATCH', `/api/listings/${ask.body.id}`, { status: 'closed' }, dan);
     assert.strictEqual(forbidden.status, 403, 'non-owner cannot change listing');
@@ -102,6 +113,10 @@ function request(server, method, urlPath, body, jar) {
     const ownerView = await request(server, 'GET', `/api/listings/${ask.body.id}/responses`, null, asha);
     assert.strictEqual(ownerView.body.owner, true);
     assert.strictEqual(ownerView.body.responses.length, 1, 'owner sees the response');
+
+    // Profile history: Asha viewing Dan's profile sees their exchanged response.
+    const profile = await request(server, 'GET', `/api/members/${reg2.body.id}`, null, asha);
+    assert.strictEqual(profile.body.history.length, 1, 'profile should include relationship history');
 
     // A logged-in member who has NOT responded and is NOT the owner is blocked.
     const eve = {};
