@@ -327,6 +327,76 @@ app.get('/api/listings/:id/responses', auth.requireAuth, wrap((req, res) => {
   res.json({ owner: isOwner, responses: rows });
 }));
 
+// --- Contacts (personal CRM) -------------------------------------------------
+
+// All contact data is private to its owner: every query below filters on
+// owner_id = the logged-in member, so nobody can read anyone else's notes.
+
+app.get('/api/contacts', auth.requireAuth, wrap((req, res) => {
+  const rows = db.prepare(`
+    SELECT c.*, (c.linked_member_id IS NOT NULL) AS linked
+    FROM contacts c
+    WHERE c.owner_id = ?
+    ORDER BY (c.follow_up IS NULL), c.follow_up, c.name
+  `).all(req.member.id);
+  res.json(rows);
+}));
+
+// Create a contact two ways:
+//  { member_id }  → pull a network member into your CRM (details copied, link kept)
+//  { name, ... }  → external contact, someone not in the app
+app.post('/api/contacts', auth.requireAuth, wrap((req, res) => {
+  const { member_id } = req.body;
+  let info;
+  if (member_id) {
+    if (Number(member_id) === req.member.id) {
+      return res.status(400).json({ error: 'You are always in your own corner — no need to add yourself' });
+    }
+    const m = db.prepare('SELECT * FROM members WHERE id = ?').get(member_id);
+    if (!m) return res.status(404).json({ error: 'Member not found' });
+    const dup = db.prepare(
+      'SELECT 1 FROM contacts WHERE owner_id = ? AND linked_member_id = ?'
+    ).get(req.member.id, m.id);
+    if (dup) return res.status(409).json({ error: `${m.name} is already in your contacts` });
+    info = db.prepare(`
+      INSERT INTO contacts (owner_id, linked_member_id, name, business_name, category, email, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(req.member.id, m.id, m.name, m.business_name, m.category, m.email, String(req.body.notes || '').trim());
+  } else {
+    required(req.body, ['name']);
+    const { name, business_name = '', category = '', email = '', phone = '', notes = '', follow_up = null } = req.body;
+    info = db.prepare(`
+      INSERT INTO contacts (owner_id, name, business_name, category, email, phone, notes, follow_up)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.member.id, name.trim(), business_name.trim(), category.trim(), email.trim(), phone.trim(), notes.trim(), follow_up || null);
+  }
+  res.status(201).json(db.prepare('SELECT * FROM contacts WHERE id = ?').get(info.lastInsertRowid));
+}));
+
+app.patch('/api/contacts/:id', auth.requireAuth, wrap((req, res) => {
+  const contact = db.prepare(
+    'SELECT * FROM contacts WHERE id = ? AND owner_id = ?'
+  ).get(req.params.id, req.member.id);
+  if (!contact) return res.status(404).json({ error: 'Contact not found' });
+  const fields = ['name', 'business_name', 'category', 'email', 'phone', 'notes', 'follow_up'];
+  for (const f of fields) {
+    if (f in req.body) {
+      const v = req.body[f];
+      db.prepare(`UPDATE contacts SET ${f} = ? WHERE id = ?`)
+        .run(v === null ? null : String(v).trim(), contact.id);
+    }
+  }
+  res.json(db.prepare('SELECT * FROM contacts WHERE id = ?').get(contact.id));
+}));
+
+app.delete('/api/contacts/:id', auth.requireAuth, wrap((req, res) => {
+  const info = db.prepare(
+    'DELETE FROM contacts WHERE id = ? AND owner_id = ?'
+  ).run(req.params.id, req.member.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'Contact not found' });
+  res.json({ ok: true });
+}));
+
 // --- Cross-app search ------------------------------------------------------
 
 // The headline feature: a single query that surfaces matching members,
