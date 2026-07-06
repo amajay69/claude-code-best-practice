@@ -124,6 +124,33 @@ function request(server, method, urlPath, body, jar) {
     const eveView = await request(server, 'GET', `/api/listings/${ask.body.id}/responses`, null, eve);
     assert.strictEqual(eveView.status, 403, 'unrelated member cannot view responses');
 
+    // CRM: Asha pulls Dan from the network into her private contacts.
+    const linked = await request(server, 'POST', '/api/contacts', { member_id: reg2.body.id }, asha);
+    assert.strictEqual(linked.status, 201, 'linked contact should be created');
+    const dupContact = await request(server, 'POST', '/api/contacts', { member_id: reg2.body.id }, asha);
+    assert.strictEqual(dupContact.status, 409, 'duplicate linked contact should 409');
+
+    // CRM: external contact with private notes and a follow-up date.
+    const ext = await request(server, 'POST', '/api/contacts', {
+      name: 'Ravi Mehta', business_name: 'Mehta Printing', notes: 'met at expo', follow_up: '2026-08-01',
+    }, asha);
+    assert.strictEqual(ext.status, 201, 'external contact should be created');
+
+    const myContacts = await request(server, 'GET', '/api/contacts', null, asha);
+    assert.strictEqual(myContacts.body.length, 2, 'owner sees both contacts');
+
+    // Privacy: Dan cannot see or edit Asha's contacts.
+    const dansContacts = await request(server, 'GET', '/api/contacts', null, dan);
+    assert.strictEqual(dansContacts.body.length, 0, 'contacts are private per owner');
+    const foreignPatch = await request(server, 'PATCH', `/api/contacts/${ext.body.id}`, { notes: 'hax' }, dan);
+    assert.strictEqual(foreignPatch.status, 404, "cannot edit another member's contact");
+
+    // Update + delete round-trip.
+    const notesPatch = await request(server, 'PATCH', `/api/contacts/${ext.body.id}`, { notes: 'call after expo' }, asha);
+    assert.strictEqual(notesPatch.body.notes, 'call after expo', 'notes should update');
+    const del = await request(server, 'DELETE', `/api/contacts/${ext.body.id}`, null, asha);
+    assert.strictEqual(del.body.ok, true, 'contact should delete');
+
     // response_count surfaces on the listings collection.
     const listings = await request(server, 'GET', '/api/listings?kind=ask', null, asha);
     const theAsk = listings.body.find((l) => l.id === ask.body.id);
