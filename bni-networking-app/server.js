@@ -154,7 +154,73 @@ app.get('/api/members/:id', wrap((req, res) => {
   member.listings = db
     .prepare('SELECT * FROM listings WHERE member_id = ? ORDER BY created_at DESC')
     .all(member.id);
+  // Relationship history: when a logged-in member views someone else's profile,
+  // include every response exchanged between the two (in either direction).
+  if (req.member && req.member.id !== member.id) {
+    member.history = db.prepare(`
+      SELECT r.message, r.created_at,
+             l.title AS listing_title, l.kind AS listing_kind,
+             sender.id AS sender_id, sender.name AS sender_name
+      FROM responses r
+      JOIN listings l ON l.id = r.listing_id
+      JOIN members sender ON sender.id = r.member_id
+      WHERE (r.member_id = ? AND l.member_id = ?)
+         OR (r.member_id = ? AND l.member_id = ?)
+      ORDER BY r.created_at
+    `).all(member.id, req.member.id, req.member.id, member.id);
+  }
   res.json(member);
+}));
+
+// --- Matches (the heart of the new home screen) ------------------------------
+
+// Answers "who should I talk to today?" by intersecting the logged-in member's
+// open listings with everyone else's, on shared tags (+ a category bonus).
+// direction 'they_can_help' = their Give matches one of your Asks;
+// direction 'you_can_help'  = their Ask matches one of your Gives.
+app.get('/api/matches', auth.requireAuth, wrap((req, res) => {
+  const mine = db.prepare(
+    "SELECT * FROM listings WHERE member_id = ? AND status = 'open'"
+  ).all(req.member.id);
+  const others = db.prepare(`
+    SELECT l.*, m.name AS member_name, m.business_name, m.category, g.name AS group_name
+    FROM listings l
+    JOIN members m ON m.id = l.member_id
+    LEFT JOIN groups g ON g.id = m.group_id
+    WHERE l.member_id != ? AND l.status = 'open'
+  `).all(req.member.id);
+
+  const tagSet = (l) => new Set(
+    String(l.tags || '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
+  );
+
+  const matches = [];
+  for (const my of mine) {
+    const wantKind = my.kind === 'ask' ? 'give' : 'ask';
+    const myTags = tagSet(my);
+    if (!myTags.size) continue;
+    for (const their of others) {
+      if (their.kind !== wantKind) continue;
+      const shared = [...tagSet(their)].filter((t) => myTags.has(t));
+      const categoryBonus = their.category && myTags.has(their.category.toLowerCase()) ? 1 : 0;
+      const score = shared.length + categoryBonus;
+      if (score === 0) continue;
+      matches.push({
+        direction: my.kind === 'ask' ? 'they_can_help' : 'you_can_help',
+        score,
+        shared_tags: shared,
+        your_listing: { id: my.id, kind: my.kind, title: my.title },
+        their_listing: {
+          id: their.id, kind: their.kind, title: their.title,
+          description: their.description, tags: their.tags,
+          member_id: their.member_id, member_name: their.member_name,
+          business_name: their.business_name, group_name: their.group_name,
+        },
+      });
+    }
+  }
+  matches.sort((a, b) => b.score - a.score);
+  res.json({ matches });
 }));
 
 // --- Posts (business talk) -------------------------------------------------
