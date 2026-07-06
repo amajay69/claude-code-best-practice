@@ -11,7 +11,8 @@ const authScreen = document.getElementById('authScreen');
 const fab = document.getElementById('fab');
 
 let currentUser = null;
-let currentView = 'feed';
+let currentView = 'matches';
+let profileMemberId = null; // when set, the profile view overrides the tab view
 let searchKind = '';
 let searchTimer = null;
 
@@ -49,6 +50,19 @@ const val = (id) => {
   const el = document.getElementById(id);
   return el ? el.value.trim() : '';
 };
+
+// Clickable member name — anywhere a name appears it opens that profile.
+const plink = (mid, name) => `<a href="#" class="plink" data-mid="${mid}">${esc(name)}</a>`;
+
+// One delegated listener handles every profile link/button, so views never
+// need to re-wire name clicks after each render.
+app.addEventListener('click', (e) => {
+  const el = e.target.closest('.plink, .plink-btn');
+  if (!el) return;
+  e.preventDefault();
+  profileMemberId = Number(el.dataset.mid);
+  renderView();
+});
 
 // --- Auth flow -------------------------------------------------------------
 
@@ -136,11 +150,85 @@ async function submitAuth() {
 async function logout() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   currentUser = null;
+  profileMemberId = null;
   document.getElementById('globalSearch').value = '';
   showAuth();
 }
 
 // --- Views -----------------------------------------------------------------
+
+// Home screen: who should you talk to today? Two sections driven by the
+// matching engine — their Gives that answer your Asks, and vice versa.
+async function renderMatches() {
+  const data = await api('/api/matches');
+  const theyCanHelp = data.matches.filter((m) => m.direction === 'they_can_help');
+  const youCanHelp = data.matches.filter((m) => m.direction === 'you_can_help');
+  const section = (title, rows, empty) =>
+    `<div class="section-title">${title}</div>` +
+    (rows.length ? rows.map(matchCard).join('') : `<div class="empty">${empty}</div>`);
+  app.innerHTML =
+    section('⚡ People who can help you', theyCanHelp,
+      'No matches for your Asks yet. Post an Ask with tags — we match them against every Give in the network.') +
+    section('🤝 People you can help', youCanHelp,
+      'No one needs your Gives yet. Tag your Gives so Asks can find them.');
+  wireListingButtons();
+}
+
+function matchCard(m) {
+  const t = m.their_listing;
+  return `
+    <div class="card">
+      <div class="row">
+        <h4>${esc(t.title)}</h4>
+        <span class="badge ${t.kind}">${t.kind}</span>
+      </div>
+      <div class="meta">${plink(t.member_id, t.member_name)} · ${esc(t.business_name || '')} · ${esc(t.group_name || 'No group')}</div>
+      ${t.description ? `<p>${esc(t.description)}</p>` : ''}
+      <div class="meta">Matches your ${m.your_listing.kind} “${esc(m.your_listing.title)}” — shared: ${m.shared_tags.map(esc).join(', ')}</div>
+      <div class="listing-actions">
+        <span class="count-badge">match score ${m.score}</span>
+        <button class="btn small respond" data-id="${t.id}" data-title="${esc(t.title)}">Connect →</button>
+        <button class="btn secondary small plink-btn" data-mid="${t.member_id}">View profile</button>
+      </div>
+    </div>`;
+}
+
+// Rich person profile: who they are, their open Asks/Gives (respondable in
+// place), and your relationship history with them.
+async function renderProfile(mid) {
+  const m = await api(`/api/members/${mid}`);
+  const isMe = m.id === currentUser.id;
+  const open = (m.listings || []).filter((l) => l.status === 'open');
+  const augment = (l) => ({
+    ...l, member_name: m.name, business_name: m.business_name,
+    group_name: m.group_name, response_count: l.response_count || 0,
+  });
+  app.innerHTML = `
+    <button class="btn secondary small" id="backBtn">← Back</button>
+    <div class="card" style="margin-top:12px">
+      <div class="row">
+        <h4 style="font-size:20px">${esc(m.name)}${isMe ? ' <span class="meta">(you)</span>' : ''}</h4>
+        <span class="badge member">${esc(m.group_name || 'No group')}</span>
+      </div>
+      <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
+      ${m.email ? `<div class="meta">${esc(m.email)}</div>` : ''}
+    </div>
+    <div class="section-title">Open asks &amp; gives</div>` +
+    (open.length ? open.map((l) => listingCard(augment(l))).join('') : '<div class="empty">Nothing open right now.</div>') +
+    ((m.history && m.history.length)
+      ? `<div class="section-title">Your history with ${esc(m.name)}</div>` +
+        m.history.map((h) => `
+          <div class="response">
+            <div class="who">${esc(h.sender_name)} <small>· on ${h.listing_kind} “${esc(h.listing_title)}” · ${esc(h.created_at)}</small></div>
+            <p>${esc(h.message)}</p>
+          </div>`).join('')
+      : '');
+  document.getElementById('backBtn').addEventListener('click', () => {
+    profileMemberId = null;
+    renderView();
+  });
+  wireListingButtons();
+}
 
 async function renderFeed() {
   const posts = await api('/api/posts');
@@ -152,7 +240,7 @@ async function renderFeed() {
             (p) => `
         <div class="card">
           <div class="row">
-            <h4>${esc(p.member_name)} <span class="meta">· ${esc(p.business_name || '')}</span></h4>
+            <h4>${plink(p.member_id, p.member_name)} <span class="meta">· ${esc(p.business_name || '')}</span></h4>
             <span class="badge post">${esc(p.group_name || 'No group')}</span>
           </div>
           <p>${esc(p.content)}</p>
@@ -188,7 +276,7 @@ function listingCard(l) {
         <h4>${esc(l.title)}</h4>
         <span class="badge ${l.kind}">${l.kind}</span>
       </div>
-      <div class="meta">${esc(l.member_name)} · ${esc(l.business_name || '')} · ${esc(l.group_name || 'No group')}</div>
+      <div class="meta">${plink(l.member_id, l.member_name)} · ${esc(l.business_name || '')} · ${esc(l.group_name || 'No group')}</div>
       ${l.description ? `<p>${esc(l.description)}</p>` : ''}
       ${tagPills(l.tags)}
       <div class="listing-actions">
@@ -269,7 +357,7 @@ async function renderMembers() {
             (m) => `
         <div class="card">
           <div class="row">
-            <h4>${esc(m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
+            <h4>${plink(m.id, m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
             <span class="badge member">${esc(m.group_name || 'No group')}</span>
           </div>
           <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
@@ -297,7 +385,7 @@ async function renderSearch(q) {
         return `
         <div class="card search-result">
           <div class="row">
-            <h4>${esc(r.title)}</h4>
+            <h4>${r.type === 'member' ? plink(r.id, r.title) : esc(r.title)}</h4>
             <span class="badge ${r.type}">${r.type}</span>
           </div>
           ${r.subtitle ? `<p>${esc(r.subtitle)}</p>` : ''}
@@ -313,9 +401,12 @@ async function renderSearch(q) {
 
 function renderView() {
   const q = document.getElementById('globalSearch').value.trim();
-  // The FAB makes no sense on the read-only members directory or in search.
-  fab.classList.toggle('hidden', currentView === 'members' || !!q);
+  // The FAB only applies where "create" has an obvious meaning.
+  fab.classList.toggle('hidden',
+    !!q || profileMemberId !== null || currentView === 'members' || currentView === 'matches');
   if (q) return renderSearch(q);
+  if (profileMemberId !== null) return renderProfile(profileMemberId);
+  if (currentView === 'matches') return renderMatches();
   if (currentView === 'feed') return renderFeed();
   if (currentView === 'asks') return renderListings('ask');
   if (currentView === 'gives') return renderListings('give');
@@ -431,6 +522,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     tab.classList.add('active');
     currentView = tab.dataset.view;
+    profileMemberId = null;
     document.getElementById('globalSearch').value = '';
     renderView();
   });
