@@ -80,6 +80,23 @@ function init() {
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Personal CRM: each member's private contact book. A contact may be
+    -- linked to a network member (pulled in from search) or fully external
+    -- (someone not in the app). Notes/follow-ups are visible only to owner_id.
+    CREATE TABLE IF NOT EXISTS contacts (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id         INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      linked_member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+      name             TEXT NOT NULL,
+      business_name    TEXT NOT NULL DEFAULT '',
+      category         TEXT NOT NULL DEFAULT '',
+      email            TEXT NOT NULL DEFAULT '',
+      phone            TEXT NOT NULL DEFAULT '',
+      notes            TEXT NOT NULL DEFAULT '',
+      follow_up        TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Server-side sessions: a random token maps to the logged-in member.
     CREATE TABLE IF NOT EXISTS sessions (
       token      TEXT PRIMARY KEY,
@@ -92,6 +109,7 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_listings_kind     ON listings(kind);
     CREATE INDEX IF NOT EXISTS idx_responses_listing ON responses(listing_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_member   ON sessions(member_id);
+    CREATE INDEX IF NOT EXISTS idx_contacts_owner    ON contacts(owner_id);
   `);
 
   migrate();
