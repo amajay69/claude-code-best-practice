@@ -59,6 +59,30 @@ body {
 }
 .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* Space switcher: Network vs My CRM */
+.spaces { display: flex; gap: 8px; padding: 16px 24px 0; }
+.space {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.space.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Contact cards (CRM) */
+.follow-chip {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.follow-chip.overdue { background: rgba(255, 122, 122, 0.18); color: #ff7a7a; }
+
 /* Tabs */
 .tabs {
   display: flex;
