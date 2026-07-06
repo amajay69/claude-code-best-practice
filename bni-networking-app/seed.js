@@ -73,13 +73,29 @@ function populate() {
   ];
   responses.forEach((r) => insertResponse.run(...r));
 
+  // Asha's personal CRM: one contact pulled from the network (Daniel) and one
+  // external contact who is not an app member at all.
+  const insertContact = db.prepare(`
+    INSERT INTO contacts (owner_id, linked_member_id, name, business_name, category, email, phone, notes, follow_up)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertContact.run(
+    memberIds[0], memberIds[1], 'Daniel Cho', 'Cho Tax & Books', 'Accounting',
+    'dan@chotax.com', '', 'Responded to my accountant ask — schedule an intro call.', null
+  );
+  insertContact.run(
+    memberIds[0], null, 'Ravi Mehta', 'Mehta Printing', 'Print & Signage',
+    'ravi@mehtaprint.com', '+91 98200 12345',
+    'Met at the trade expo. Great pricing on banners — not on the app yet, invite him.', null
+  );
+
   return { groups: groups.length, members: members.length, posts: posts.length, listings: listings.length, responses: responses.length };
 }
 
 // Destructive: clear all data, then repopulate. Used by `npm run seed`.
 function seed() {
   init();
-  db.exec('DELETE FROM responses; DELETE FROM sessions; DELETE FROM listings; DELETE FROM posts; DELETE FROM members; DELETE FROM groups;');
+  db.exec('DELETE FROM contacts; DELETE FROM responses; DELETE FROM sessions; DELETE FROM listings; DELETE FROM posts; DELETE FROM members; DELETE FROM groups;');
   return populate();
 }
 
