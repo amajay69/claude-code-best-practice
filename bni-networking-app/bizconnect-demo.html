@@ -1,0 +1,701 @@
+<title>BizConnect — Networking Demo</title>
+<style>
+  /* ---- Design tokens: dark is the product's home theme; light is fully
+     considered, not inverted. Viewer toggle (data-theme) beats the media query. */
+  :root {
+    --bg: #f3f4fa; --bg-glow: #e8ebfa;
+    --panel: #ffffff; --panel-2: #eceefb;
+    --text: #1c2140; --muted: #5c648c;
+    --accent: #4a7dfa; --accent-ink: #ffffff;
+    --ask: #a05f00; --ask-bg: rgba(255, 177, 85, 0.22);
+    --give: #0e7a55; --give-bg: rgba(79, 209, 161, 0.22);
+    --border: #d8dcf0; --shadow: 0 8px 24px rgba(74, 125, 250, 0.25);
+    --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1226; --bg-glow: #1c2350;
+      --panel: #1a1f3a; --panel-2: #232a4d;
+      --text: #e8ebf7; --muted: #9aa3c7;
+      --accent: #5b8cff; --accent-ink: #ffffff;
+      --ask: #ffb155; --ask-bg: rgba(255, 177, 85, 0.18);
+      --give: #4fd1a1; --give-bg: rgba(79, 209, 161, 0.18);
+      --border: #2c3358; --shadow: 0 8px 24px rgba(91, 140, 255, 0.4);
+      --danger: #ff7a7a;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f4fa; --bg-glow: #e8ebfa;
+    --panel: #ffffff; --panel-2: #eceefb;
+    --text: #1c2140; --muted: #5c648c;
+    --accent: #4a7dfa; --accent-ink: #ffffff;
+    --ask: #a05f00; --ask-bg: rgba(255, 177, 85, 0.22);
+    --give: #0e7a55; --give-bg: rgba(79, 209, 161, 0.22);
+    --border: #d8dcf0; --shadow: 0 8px 24px rgba(74, 125, 250, 0.25);
+    --danger: #b3261e;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1226; --bg-glow: #1c2350;
+    --panel: #1a1f3a; --panel-2: #232a4d;
+    --text: #e8ebf7; --muted: #9aa3c7;
+    --accent: #5b8cff; --accent-ink: #ffffff;
+    --ask: #ffb155; --ask-bg: rgba(255, 177, 85, 0.18);
+    --give: #4fd1a1; --give-bg: rgba(79, 209, 161, 0.18);
+    --border: #2c3358; --shadow: 0 8px 24px rgba(91, 140, 255, 0.4);
+    --danger: #ff7a7a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, var(--bg-glow) 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  button { font-family: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .demo-note {
+    text-align: center; font-size: 12.5px; color: var(--muted);
+    padding: 7px 16px; border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 24px; position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { font-size: 21px; font-weight: 700; white-space: nowrap; letter-spacing: -0.01em; }
+  .search { flex: 1; min-width: 240px; max-width: 720px; }
+  .search input {
+    width: 100%; padding: 11px 16px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); font-size: 15px; outline: none;
+  }
+  .search input:focus { border-color: var(--accent); }
+  .search-filters { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer;
+  }
+  .chip.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .user-area { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .user-area .who { font-size: 14px; text-align: right; }
+  .user-area .who small { display: block; color: var(--muted); font-size: 12px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 6px; padding: 14px 24px 0; flex-wrap: wrap; }
+  .tab {
+    background: transparent; border: none; color: var(--muted);
+    padding: 10px 16px; font-size: 15px; cursor: pointer; border-radius: 10px 10px 0 0;
+  }
+  .tab.active { color: var(--text); background: var(--panel); font-weight: 600; }
+
+  main { padding: 20px 24px 110px; max-width: 980px; margin: 0 auto; }
+
+  /* Cards */
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card h4 { margin: 0 0 4px; font-size: 16px; }
+  .card .meta { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  .card p { margin: 6px 0; line-height: 1.5; }
+  .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge.ask   { background: var(--ask-bg);  color: var(--ask); }
+  .badge.give  { background: var(--give-bg); color: var(--give); }
+  .badge.member { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .badge.post, .badge.closed { background: var(--panel-2); color: var(--muted); }
+
+  .tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 12px; background: var(--panel-2); color: var(--muted); border-radius: 6px; padding: 2px 8px; }
+
+  .section-title {
+    margin: 8px 0 14px; font-size: 13px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  .count-badge {
+    font-size: 12px; color: var(--muted); background: var(--panel-2);
+    border-radius: 999px; padding: 2px 9px; font-variant-numeric: tabular-nums;
+  }
+
+  .btn {
+    background: var(--accent); color: var(--accent-ink); border: none;
+    border-radius: 10px; padding: 10px 16px; font-size: 14px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.small { padding: 5px 10px; font-size: 13px; }
+  .listing-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  /* Forms */
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field textarea, .field select {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); font-size: 14px; font-family: inherit;
+  }
+  .field textarea { min-height: 80px; resize: vertical; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(8, 10, 25, 0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 18px; border-bottom: 1px solid var(--border);
+  }
+  .modal-head h3 { margin: 0; font-size: 17px; }
+  .modal-body { padding: 18px; }
+  .icon-btn { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+
+  /* FAB */
+  .fab {
+    position: fixed; right: 26px; bottom: 26px; width: 56px; height: 56px;
+    border-radius: 50%; border: none; background: var(--accent); color: var(--accent-ink);
+    font-size: 28px; line-height: 1; cursor: pointer; box-shadow: var(--shadow); z-index: 30;
+  }
+
+  /* Auth screen */
+  .auth-screen { min-height: 88vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .auth-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 32px; width: 100%; max-width: 400px; text-align: center;
+  }
+  .brand.big { font-size: 30px; }
+  .auth-tag { color: var(--muted); margin: 8px 0 22px; line-height: 1.5; }
+  .auth-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+  .auth-tab {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+    padding: 9px; border-radius: 10px; cursor: pointer;
+  }
+  .auth-tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .auth-card .field { text-align: left; }
+  .auth-card .btn { width: 100%; margin-top: 6px; }
+  .auth-hint { color: var(--muted); font-size: 13px; margin-top: 14px; min-height: 18px; }
+  .auth-hint.error { color: var(--danger); }
+  .demo-creds {
+    margin-top: 16px; padding: 10px 12px; border-radius: 10px;
+    background: var(--panel-2); font-size: 12.5px; color: var(--muted); line-height: 1.6;
+  }
+  .demo-creds code { color: var(--text); }
+
+  /* Responses */
+  .responses { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .response {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .response .who { font-size: 13px; font-weight: 600; }
+  .response .who small { color: var(--muted); font-weight: 400; }
+  .response p { margin: 4px 0 0; font-size: 14px; }
+
+  .hidden { display: none !important; }
+  @media (prefers-reduced-motion: no-preference) {
+    .card { animation: rise 0.18s ease-out; }
+    @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+
+<div class="demo-note">Demo mode — everything runs in your browser. Data resets when the page reloads.</div>
+
+<section class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <div class="brand big">🤝 BizConnect</div>
+    <p class="auth-tag">Networking for business groups — share, ask, give, connect.</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-auth="login">Log in</button>
+      <button class="auth-tab" data-auth="register">Sign up</button>
+    </div>
+    <div id="authBody"></div>
+    <p class="auth-hint" id="authHint"></p>
+    <div class="demo-creds">
+      Try a demo member: <code>asha@vermaweb.com</code><br>
+      password <code>password123</code> (works for every seeded member)
+    </div>
+  </div>
+</section>
+
+<div id="appRoot" class="hidden">
+  <header class="topbar">
+    <div class="brand">🤝 BizConnect</div>
+    <div class="search">
+      <input id="globalSearch" type="search" placeholder="Search members, posts, asks &amp; gives…" autocomplete="off" />
+      <div class="search-filters">
+        <button class="chip active" data-kind="">All</button>
+        <button class="chip" data-kind="member">Members</button>
+        <button class="chip" data-kind="post">Posts</button>
+        <button class="chip" data-kind="ask">Asks</button>
+        <button class="chip" data-kind="give">Gives</button>
+      </div>
+    </div>
+    <div class="user-area" id="userArea"></div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="feed">Feed</button>
+    <button class="tab" data-view="asks">Asks</button>
+    <button class="tab" data-view="gives">Gives</button>
+    <button class="tab" data-view="groups">Groups</button>
+    <button class="tab" data-view="members">Members</button>
+  </nav>
+
+  <main id="app"></main>
+</div>
+
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">New</h3>
+      <button class="icon-btn" id="modalClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<button class="fab hidden" id="fab" title="Create">＋</button>
+
+<script>
+'use strict';
+// ============================================================================
+// In-memory "backend" — mirrors the real app's SQLite schema and REST rules
+// (identity-aware creation, owner-only status changes, response visibility).
+// ============================================================================
+let nextId = 1;
+const id = () => nextId++;
+
+const db = { groups: [], members: [], posts: [], listings: [], responses: [] };
+
+function seed() {
+  const g1 = { id: id(), name: 'Sunrise Chapter', description: 'Early-morning networking for founders and service pros.' };
+  const g2 = { id: id(), name: 'Metro Business Network', description: 'Downtown professionals across trades and consulting.' };
+  db.groups.push(g1, g2);
+
+  const mk = (name, business_name, category, email, group_id) =>
+    ({ id: id(), name, business_name, category, email, password: 'password123', group_id });
+  const asha   = mk('Asha Verma', 'Verma Web Studio', 'Web Development', 'asha@vermaweb.com', g1.id);
+  const dan    = mk('Daniel Cho', 'Cho Tax & Books', 'Accounting', 'dan@chotax.com', g1.id);
+  const priya  = mk('Priya Nair', 'Nair Interiors', 'Interior Design', 'priya@nairinteriors.com', g1.id);
+  const marcus = mk('Marcus Bell', 'Bell Legal', 'Law', 'marcus@belllegal.com', g2.id);
+  const sofia  = mk('Sofia Ramos', 'Ramos Marketing', 'Marketing', 'sofia@ramosmktg.com', g2.id);
+  const tom    = mk('Tom Fisher', 'Fisher Plumbing', 'Trades', 'tom@fisherplumbing.com', g2.id);
+  db.members.push(asha, dan, priya, marcus, sofia, tom);
+
+  const post = (m, content) => ({ id: id(), member_id: m.id, content, created_at: stamp() });
+  db.posts.push(
+    post(asha, 'Just launched a new e-commerce site for a local bakery — happy to share results!'),
+    post(dan, 'Tax season reminder: small businesses, get your quarterly filings in early.'),
+    post(sofia, 'We helped a client triple their Instagram engagement in 60 days. Ask me how.'),
+    post(tom, 'Now offering emergency weekend plumbing call-outs across the metro area.'),
+  );
+
+  const listing = (m, kind, title, description, tags) =>
+    ({ id: id(), member_id: m.id, kind, title, description, tags, status: 'open', created_at: stamp() });
+  const l1 = listing(asha, 'ask', 'Need an accountant for my growing studio', 'Looking for someone who handles freelancer/agency taxes.', 'accounting,tax,finance');
+  const l4 = listing(priya, 'ask', 'Seeking a marketing partner for showroom launch', 'Opening a new interior design showroom, need social + PR help.', 'marketing,pr,launch');
+  db.listings.push(
+    l1,
+    listing(asha, 'give', 'Free website audit for fellow members', 'I will review your site speed, SEO, and mobile UX at no cost.', 'web,seo,audit'),
+    listing(dan, 'give', 'Bookkeeping setup for new businesses', 'Can get your QuickBooks or Xero configured properly.', 'accounting,bookkeeping,quickbooks'),
+    l4,
+    listing(marcus, 'give', 'Free 30-min legal consult for members', 'Contracts, incorporation, IP basics — first call is on me.', 'law,contracts,legal'),
+    listing(sofia, 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros.', 'marketing,saas,referrals'),
+    listing(tom, 'give', 'Discounted plumbing for member offices', '15% off commercial plumbing for anyone in the network.', 'plumbing,trades,office'),
+  );
+
+  db.responses.push(
+    { id: id(), listing_id: l1.id, member_id: dan.id, message: 'Hi Asha — I specialize in agency & freelancer taxes. Happy to help!', created_at: stamp() },
+    { id: id(), listing_id: l4.id, member_id: sofia.id, message: "Marketing is our thing — we'd love to support your showroom launch.", created_at: stamp() },
+  );
+}
+
+function stamp() { return new Date().toISOString().slice(0, 16).replace('T', ' '); }
+const memberById = (mid) => db.members.find((m) => m.id === mid);
+const groupName = (gid) => (db.groups.find((g) => g.id === gid) || {}).name || null;
+const responseCount = (lid) => db.responses.filter((r) => r.listing_id === lid).length;
+
+// ============================================================================
+// UI state + helpers
+// ============================================================================
+const app = document.getElementById('app');
+const appRoot = document.getElementById('appRoot');
+const authScreen = document.getElementById('authScreen');
+const fab = document.getElementById('fab');
+
+let currentUser = null;
+let currentView = 'feed';
+let searchKind = '';
+let searchTimer = null;
+let authMode = 'login';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const tagPills = (tags) => !tags ? '' :
+  '<div class="tags">' + tags.split(',').map((t) => t.trim()).filter(Boolean)
+    .map((t) => `<span class="tag">${esc(t)}</span>`).join('') + '</div>';
+
+const val = (idStr) => { const el = document.getElementById(idStr); return el ? el.value.trim() : ''; };
+
+// ============================================================================
+// Auth
+// ============================================================================
+function showAuth() {
+  appRoot.classList.add('hidden');
+  fab.classList.add('hidden');
+  authScreen.classList.remove('hidden');
+  renderAuthForm('login');
+}
+
+function showApp() {
+  authScreen.classList.add('hidden');
+  appRoot.classList.remove('hidden');
+  document.getElementById('userArea').innerHTML = `
+    <span class="who">${esc(currentUser.name)}<small>${esc(currentUser.business_name || '')}</small></span>
+    <button class="btn secondary small" id="logoutBtn">Log out</button>`;
+  document.getElementById('logoutBtn').addEventListener('click', () => {
+    currentUser = null;
+    document.getElementById('globalSearch').value = '';
+    showAuth();
+  });
+  renderView();
+}
+
+function renderAuthForm(mode) {
+  authMode = mode;
+  document.querySelectorAll('.auth-tab').forEach((t) => t.classList.toggle('active', t.dataset.auth === mode));
+  document.getElementById('authHint').textContent = '';
+  const body = document.getElementById('authBody');
+  body.innerHTML = mode === 'login' ? `
+      <div class="field"><label>Email</label><input id="a_email" type="email" /></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" /></div>
+      <button class="btn" id="a_submit">Log in</button>` : `
+      <div class="field"><label>Your name</label><input id="a_name" /></div>
+      <div class="field"><label>Business name</label><input id="a_biz" /></div>
+      <div class="field"><label>Category</label><input id="a_cat" placeholder="e.g. Marketing" /></div>
+      <div class="field"><label>Email</label><input id="a_email" type="email" /></div>
+      <div class="field"><label>Password</label><input id="a_password" type="password" /></div>
+      <button class="btn" id="a_submit">Create account</button>`;
+  document.getElementById('a_submit').addEventListener('click', submitAuth);
+  body.querySelectorAll('input').forEach((inp) =>
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); }));
+}
+
+function submitAuth() {
+  const hint = document.getElementById('authHint');
+  hint.className = 'auth-hint';
+  const email = val('a_email').toLowerCase();
+  const password = val('a_password');
+  try {
+    if (!email || !password) throw new Error('Email and password are required.');
+    if (authMode === 'login') {
+      const m = db.members.find((x) => x.email.toLowerCase() === email);
+      if (!m || m.password !== password) throw new Error('Invalid email or password.');
+      currentUser = m;
+    } else {
+      const name = val('a_name');
+      if (!name) throw new Error('Name is required.');
+      if (db.members.some((x) => x.email.toLowerCase() === email)) throw new Error('That email is already registered.');
+      const m = { id: id(), name, business_name: val('a_biz'), category: val('a_cat'), email: val('a_email'), password, group_id: null };
+      db.members.push(m);
+      currentUser = m;
+    }
+    showApp();
+  } catch (err) {
+    hint.className = 'auth-hint error';
+    hint.textContent = err.message;
+  }
+}
+
+// ============================================================================
+// Views
+// ============================================================================
+function renderFeed() {
+  const posts = [...db.posts].reverse();
+  app.innerHTML = '<div class="section-title">Business talk from the network</div>' +
+    (posts.length ? posts.map((p) => {
+      const m = memberById(p.member_id);
+      return `
+      <div class="card">
+        <div class="row">
+          <h4>${esc(m.name)} <span class="meta">· ${esc(m.business_name || '')}</span></h4>
+          <span class="badge post">${esc(groupName(m.group_id) || 'No group')}</span>
+        </div>
+        <p>${esc(p.content)}</p>
+        <div class="meta">${esc(p.created_at)}</div>
+      </div>`;
+    }).join('') : '<div class="empty">No posts yet. Tap ＋ to share something.</div>');
+}
+
+function renderListings(kind) {
+  const rows = db.listings.filter((l) => l.kind === kind).reverse();
+  const label = kind === 'ask' ? 'Asks — what members need' : 'Gives — what members offer';
+  app.innerHTML = `<div class="section-title">${label}</div>` +
+    (rows.length ? rows.map(listingCard).join('') : `<div class="empty">No ${kind}s yet. Tap ＋ to add one.</div>`);
+  wireListingButtons();
+}
+
+function listingCard(l) {
+  const m = memberById(l.member_id);
+  const isOwner = currentUser && l.member_id === currentUser.id;
+  const count = responseCount(l.id);
+  const ownerActions = isOwner
+    ? `<button class="btn secondary small toggle-status" data-id="${l.id}" data-status="${l.status === 'open' ? 'closed' : 'open'}">Mark ${l.status === 'open' ? 'closed' : 'open'}</button>
+       <button class="btn secondary small view-responses" data-id="${l.id}">View responses</button>`
+    : `<button class="btn small respond" data-id="${l.id}">Respond / Connect</button>`;
+  return `
+    <div class="card" id="listing-${l.id}">
+      <div class="row">
+        <h4>${esc(l.title)}</h4>
+        <span class="badge ${l.kind}">${l.kind}</span>
+      </div>
+      <div class="meta">${esc(m.name)} · ${esc(m.business_name || '')} · ${esc(groupName(m.group_id) || 'No group')}</div>
+      ${l.description ? `<p>${esc(l.description)}</p>` : ''}
+      ${tagPills(l.tags)}
+      <div class="listing-actions">
+        <span class="badge ${l.status === 'closed' ? 'closed' : l.kind}">${esc(l.status)}</span>
+        ${count ? `<span class="count-badge">${count} response${count === 1 ? '' : 's'}</span>` : ''}
+        ${ownerActions}
+      </div>
+      <div class="responses-slot"></div>
+    </div>`;
+}
+
+function wireListingButtons() {
+  document.querySelectorAll('.toggle-status').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const l = db.listings.find((x) => x.id === Number(btn.dataset.id));
+      if (l && l.member_id === currentUser.id) l.status = btn.dataset.status; // owner-only, like the API
+      renderView();
+    }));
+  document.querySelectorAll('.respond').forEach((btn) =>
+    btn.addEventListener('click', () => openRespond(Number(btn.dataset.id))));
+  document.querySelectorAll('.view-responses').forEach((btn) =>
+    btn.addEventListener('click', () => loadResponses(Number(btn.dataset.id))));
+}
+
+function loadResponses(listingId) {
+  const slot = document.querySelector(`#listing-${listingId} .responses-slot`);
+  const rows = db.responses.filter((r) => r.listing_id === listingId);
+  slot.innerHTML = !rows.length
+    ? '<div class="responses"><div class="meta">No responses yet.</div></div>'
+    : '<div class="responses">' + rows.map((r) => {
+        const m = memberById(r.member_id);
+        return `
+        <div class="response">
+          <div class="who">${esc(m.name)} <small>· ${esc(m.business_name || '')} · ${esc(m.email)}</small></div>
+          <p>${esc(r.message)}</p>
+        </div>`;
+      }).join('') + '</div>';
+}
+
+function renderGroups() {
+  app.innerHTML = '<div class="section-title">Networking groups</div>' +
+    (db.groups.length ? db.groups.map((g) => {
+      const count = db.members.filter((m) => m.group_id === g.id).length;
+      return `
+      <div class="card">
+        <div class="row">
+          <h4>${esc(g.name)}</h4>
+          <span class="badge member">${count} member${count === 1 ? '' : 's'}</span>
+        </div>
+        ${g.description ? `<p>${esc(g.description)}</p>` : ''}
+      </div>`;
+    }).join('') : '<div class="empty">No groups yet. Tap ＋ to create one.</div>');
+}
+
+function renderMembers() {
+  const members = [...db.members].sort((a, b) => a.name.localeCompare(b.name));
+  app.innerHTML = '<div class="section-title">Members directory</div>' +
+    members.map((m) => `
+      <div class="card">
+        <div class="row">
+          <h4>${esc(m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
+          <span class="badge member">${esc(groupName(m.group_id) || 'No group')}</span>
+        </div>
+        <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
+        ${m.email ? `<div class="meta">${esc(m.email)}</div>` : ''}
+      </div>`).join('');
+}
+
+// Cross-app search — one query over members, posts, asks, gives.
+function renderSearch(q) {
+  const like = q.toLowerCase();
+  const has = (s) => (s || '').toLowerCase().includes(like);
+  const results = [];
+
+  if (!searchKind || searchKind === 'member') {
+    db.members.filter((m) => has(m.name) || has(m.business_name) || has(m.category))
+      .forEach((m) => results.push({
+        type: 'member', title: m.name,
+        subtitle: [m.business_name, m.category].filter(Boolean).join(' • '),
+        group: groupName(m.group_id),
+      }));
+  }
+  if (!searchKind || searchKind === 'post') {
+    db.posts.filter((p) => has(p.content)).forEach((p) => {
+      const m = memberById(p.member_id);
+      results.push({ type: 'post', title: m.name, subtitle: p.content, group: groupName(m.group_id) });
+    });
+  }
+  if (!searchKind || searchKind === 'ask' || searchKind === 'give') {
+    db.listings
+      .filter((l) => (!searchKind || l.kind === searchKind) && (has(l.title) || has(l.description) || has(l.tags)))
+      .forEach((l) => {
+        const m = memberById(l.member_id);
+        results.push({
+          type: l.kind, title: l.title, subtitle: l.description, tags: l.tags,
+          who: `${m.name} · ${m.business_name || ''}`, group: groupName(m.group_id),
+        });
+      });
+  }
+
+  app.innerHTML = !results.length
+    ? `<div class="section-title">Search</div><div class="empty">No matches for “${esc(q)}”.</div>`
+    : `<div class="section-title">${results.length} result${results.length === 1 ? '' : 's'} for “${esc(q)}”</div>` +
+      results.map((r) => `
+        <div class="card">
+          <div class="row">
+            <h4>${esc(r.title)}</h4>
+            <span class="badge ${r.type}">${r.type}</span>
+          </div>
+          ${r.subtitle ? `<p>${esc(r.subtitle)}</p>` : ''}
+          ${r.who ? `<div class="meta">${esc(r.who)}</div>` : ''}
+          ${tagPills(r.tags)}
+          ${r.group ? `<div class="meta">${esc(r.group)}</div>` : ''}
+        </div>`).join('');
+}
+
+// ============================================================================
+// Router + modal forms
+// ============================================================================
+function renderView() {
+  const q = document.getElementById('globalSearch').value.trim();
+  fab.classList.toggle('hidden', currentView === 'members' || !!q);
+  if (q) return renderSearch(q);
+  if (currentView === 'feed') return renderFeed();
+  if (currentView === 'asks') return renderListings('ask');
+  if (currentView === 'gives') return renderListings('give');
+  if (currentView === 'groups') return renderGroups();
+  if (currentView === 'members') return renderMembers();
+}
+
+const overlay = document.getElementById('modalOverlay');
+const modalBody = document.getElementById('modalBody');
+const modalTitle = document.getElementById('modalTitle');
+const closeModal = () => { overlay.classList.add('hidden'); modalBody.innerHTML = ''; };
+document.getElementById('modalClose').addEventListener('click', closeModal);
+overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+function openRespond(listingId) {
+  const l = db.listings.find((x) => x.id === listingId);
+  modalTitle.textContent = `Respond to “${l.title}”`;
+  modalBody.innerHTML = `
+    <div class="field"><label>Your message</label><textarea id="r_message" placeholder="Introduce yourself and how you can help / what you need…"></textarea></div>
+    <button class="btn" id="r_submit">Send response</button>`;
+  overlay.classList.remove('hidden');
+  document.getElementById('r_submit').addEventListener('click', () => {
+    const message = val('r_message');
+    if (!message) return alert('Write a short message first.');
+    db.responses.push({ id: id(), listing_id: listingId, member_id: currentUser.id, message, created_at: stamp() });
+    closeModal();
+    renderView();
+  });
+}
+
+function openCreate() {
+  let html = '';
+  if (currentView === 'groups') {
+    modalTitle.textContent = 'New group';
+    html = `
+      <div class="field"><label>Name</label><input id="f_name" /></div>
+      <div class="field"><label>Description</label><textarea id="f_desc"></textarea></div>
+      <button class="btn" id="f_submit">Create group</button>`;
+  } else if (currentView === 'feed') {
+    modalTitle.textContent = 'New post';
+    html = `
+      <div class="field"><label>What's on your mind?</label><textarea id="f_content"></textarea></div>
+      <button class="btn" id="f_submit">Post</button>`;
+  } else {
+    const kind = currentView === 'asks' ? 'ask' : 'give';
+    modalTitle.textContent = kind === 'ask' ? 'New Ask' : 'New Give';
+    html = `
+      <div class="field"><label>Title</label><input id="f_title" placeholder="${kind === 'ask' ? 'What do you need?' : 'What can you offer?'}" /></div>
+      <div class="field"><label>Description</label><textarea id="f_desc"></textarea></div>
+      <div class="field"><label>Tags (comma separated)</label><input id="f_tags" placeholder="marketing, referrals" /></div>
+      <button class="btn" id="f_submit">Create ${kind}</button>`;
+  }
+  modalBody.innerHTML = html;
+  overlay.classList.remove('hidden');
+  document.getElementById('f_submit').addEventListener('click', submitCreate);
+}
+
+function submitCreate() {
+  if (currentView === 'groups') {
+    const name = val('f_name');
+    if (!name) return alert('Group name is required.');
+    db.groups.push({ id: id(), name, description: val('f_desc') });
+  } else if (currentView === 'feed') {
+    const content = val('f_content');
+    if (!content) return alert('Write something first.');
+    db.posts.push({ id: id(), member_id: currentUser.id, content, created_at: stamp() });
+  } else {
+    const kind = currentView === 'asks' ? 'ask' : 'give';
+    const title = val('f_title');
+    if (!title) return alert('Title is required.');
+    db.listings.push({ id: id(), member_id: currentUser.id, kind, title, description: val('f_desc'), tags: val('f_tags'), status: 'open', created_at: stamp() });
+  }
+  closeModal();
+  renderView();
+}
+
+// ============================================================================
+// Wiring
+// ============================================================================
+document.querySelectorAll('.auth-tab').forEach((tab) =>
+  tab.addEventListener('click', () => renderAuthForm(tab.dataset.auth)));
+
+document.querySelectorAll('.tab').forEach((tab) =>
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentView = tab.dataset.view;
+    document.getElementById('globalSearch').value = '';
+    renderView();
+  }));
+
+document.querySelectorAll('.chip').forEach((chip) =>
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    searchKind = chip.dataset.kind;
+    if (document.getElementById('globalSearch').value.trim()) renderView();
+  }));
+
+document.getElementById('globalSearch').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(renderView, 200);
+});
+
+fab.addEventListener('click', openCreate);
+
+seed();
+showAuth();
+</script>
