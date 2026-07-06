@@ -38,13 +38,21 @@
       <div class="user-area" id="userArea"></div>
     </header>
 
-    <nav class="tabs">
+    <nav class="spaces">
+      <button class="space active" data-space="network">🌐 Network</button>
+      <button class="space" data-space="crm">📇 My CRM</button>
+    </nav>
+
+    <nav class="tabs" id="networkTabs">
       <button class="tab active" data-view="matches">Matches</button>
       <button class="tab" data-view="feed">Feed</button>
       <button class="tab" data-view="asks">Asks</button>
       <button class="tab" data-view="gives">Gives</button>
       <button class="tab" data-view="groups">Groups</button>
       <button class="tab" data-view="members">Members</button>
+    </nav>
+    <nav class="tabs hidden" id="crmTabs">
+      <button class="tab active" data-view="contacts">Contacts</button>
     </nav>
 
     <main id="app"></main>
