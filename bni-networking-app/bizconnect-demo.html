@@ -207,6 +207,9 @@
   .response .who small { color: var(--muted); font-weight: 400; }
   .response p { margin: 4px 0 0; font-size: 14px; }
 
+  .plink { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  .plink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
   .hidden { display: none !important; }
   @media (prefers-reduced-motion: no-preference) {
     .card { animation: rise 0.18s ease-out; }
@@ -250,7 +253,8 @@
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-view="feed">Feed</button>
+    <button class="tab active" data-view="matches">Matches</button>
+    <button class="tab" data-view="feed">Feed</button>
     <button class="tab" data-view="asks">Asks</button>
     <button class="tab" data-view="gives">Gives</button>
     <button class="tab" data-view="groups">Groups</button>
@@ -316,7 +320,8 @@ function seed() {
     listing(dan, 'give', 'Bookkeeping setup for new businesses', 'Can get your QuickBooks or Xero configured properly.', 'accounting,bookkeeping,quickbooks'),
     l4,
     listing(marcus, 'give', 'Free 30-min legal consult for members', 'Contracts, incorporation, IP basics — first call is on me.', 'law,contracts,legal'),
-    listing(sofia, 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros.', 'marketing,saas,referrals'),
+    listing(sofia, 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros — bonus if they need SEO too.', 'marketing,saas,referrals,seo'),
+    listing(sofia, 'give', 'Social media strategy session', 'One free strategy session — content calendar, channels, and quick wins.', 'marketing,social,instagram'),
     listing(tom, 'give', 'Discounted plumbing for member offices', '15% off commercial plumbing for anyone in the network.', 'plumbing,trades,office'),
   );
 
@@ -340,7 +345,8 @@ const authScreen = document.getElementById('authScreen');
 const fab = document.getElementById('fab');
 
 let currentUser = null;
-let currentView = 'feed';
+let currentView = 'matches';
+let profileMemberId = null; // when set, the profile view overrides the tab view
 let searchKind = '';
 let searchTimer = null;
 let authMode = 'login';
@@ -353,6 +359,119 @@ const tagPills = (tags) => !tags ? '' :
     .map((t) => `<span class="tag">${esc(t)}</span>`).join('') + '</div>';
 
 const val = (idStr) => { const el = document.getElementById(idStr); return el ? el.value.trim() : ''; };
+
+// Clickable member name — anywhere a name appears it opens that profile.
+const plink = (mid, name) => `<a href="#" class="plink" data-mid="${mid}">${esc(name)}</a>`;
+app.addEventListener('click', (e) => {
+  const el = e.target.closest('.plink, .plink-btn');
+  if (!el) return;
+  e.preventDefault();
+  profileMemberId = Number(el.dataset.mid);
+  renderView();
+});
+
+// ============================================================================
+// Matching engine — intersects your open listings with everyone else's on
+// shared tags (+1 if their business category appears in your tags).
+// ============================================================================
+const tagSet = (l) => new Set(String(l.tags || '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean));
+
+function computeMatches() {
+  const mine = db.listings.filter((l) => l.member_id === currentUser.id && l.status === 'open');
+  const others = db.listings.filter((l) => l.member_id !== currentUser.id && l.status === 'open');
+  const matches = [];
+  for (const my of mine) {
+    const wantKind = my.kind === 'ask' ? 'give' : 'ask';
+    const myTags = tagSet(my);
+    if (!myTags.size) continue;
+    for (const their of others) {
+      if (their.kind !== wantKind) continue;
+      const m = memberById(their.member_id);
+      const shared = [...tagSet(their)].filter((t) => myTags.has(t));
+      const categoryBonus = m.category && myTags.has(m.category.toLowerCase()) ? 1 : 0;
+      const score = shared.length + categoryBonus;
+      if (score > 0) matches.push({
+        direction: my.kind === 'ask' ? 'they_can_help' : 'you_can_help',
+        score, shared_tags: shared, your_listing: my, their_listing: their, member: m,
+      });
+    }
+  }
+  return matches.sort((a, b) => b.score - a.score);
+}
+
+function renderMatches() {
+  const all = computeMatches();
+  const theyCanHelp = all.filter((m) => m.direction === 'they_can_help');
+  const youCanHelp = all.filter((m) => m.direction === 'you_can_help');
+  const section = (title, rows, empty) =>
+    `<div class="section-title">${title}</div>` +
+    (rows.length ? rows.map(matchCard).join('') : `<div class="empty">${empty}</div>`);
+  app.innerHTML =
+    section('⚡ People who can help you', theyCanHelp,
+      'No matches for your Asks yet. Post an Ask with tags — we match them against every Give in the network.') +
+    section('🤝 People you can help', youCanHelp,
+      'No one needs your Gives yet. Tag your Gives so Asks can find them.');
+  wireListingButtons();
+}
+
+function matchCard(m) {
+  const t = m.their_listing;
+  const who = m.member;
+  return `
+    <div class="card">
+      <div class="row">
+        <h4>${esc(t.title)}</h4>
+        <span class="badge ${t.kind}">${t.kind}</span>
+      </div>
+      <div class="meta">${plink(who.id, who.name)} · ${esc(who.business_name || '')} · ${esc(groupName(who.group_id) || 'No group')}</div>
+      ${t.description ? `<p>${esc(t.description)}</p>` : ''}
+      <div class="meta">Matches your ${m.your_listing.kind} “${esc(m.your_listing.title)}” — shared: ${m.shared_tags.map(esc).join(', ')}</div>
+      <div class="listing-actions">
+        <span class="count-badge">match score ${m.score}</span>
+        <button class="btn small respond" data-id="${t.id}">Connect →</button>
+        <button class="btn secondary small plink-btn" data-mid="${who.id}">View profile</button>
+      </div>
+    </div>`;
+}
+
+// Rich person profile: who they are, their open Asks/Gives, and your
+// relationship history (responses exchanged in either direction).
+function renderProfile(mid) {
+  const m = memberById(mid);
+  const isMe = m.id === currentUser.id;
+  const open = db.listings.filter((l) => l.member_id === mid && l.status === 'open');
+  const history = db.responses.filter((r) => {
+    const l = db.listings.find((x) => x.id === r.listing_id);
+    return (r.member_id === mid && l.member_id === currentUser.id) ||
+           (r.member_id === currentUser.id && l.member_id === mid);
+  });
+  app.innerHTML = `
+    <button class="btn secondary small" id="backBtn">← Back</button>
+    <div class="card" style="margin-top:12px">
+      <div class="row">
+        <h4 style="font-size:20px">${esc(m.name)}${isMe ? ' <span class="meta">(you)</span>' : ''}</h4>
+        <span class="badge member">${esc(groupName(m.group_id) || 'No group')}</span>
+      </div>
+      <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
+      ${m.email ? `<div class="meta">${esc(m.email)}</div>` : ''}
+    </div>
+    <div class="section-title">Open asks &amp; gives</div>` +
+    (open.length ? open.map(listingCard).join('') : '<div class="empty">Nothing open right now.</div>') +
+    ((!isMe && history.length)
+      ? `<div class="section-title">Your history with ${esc(m.name)}</div>` +
+        history.map((r) => {
+          const sender = memberById(r.member_id);
+          const l = db.listings.find((x) => x.id === r.listing_id);
+          return `
+          <div class="response">
+            <div class="who">${esc(sender.name)} <small>· on ${l.kind} “${esc(l.title)}” · ${esc(r.created_at)}</small></div>
+            <p>${esc(r.message)}</p>
+          </div>`;
+        }).join('')
+      : '');
+  document.getElementById('backBtn').addEventListener('click', () => { profileMemberId = null; renderView(); });
+  wireListingButtons();
+}
 
 // ============================================================================
 // Auth
@@ -372,6 +491,7 @@ function showApp() {
     <button class="btn secondary small" id="logoutBtn">Log out</button>`;
   document.getElementById('logoutBtn').addEventListener('click', () => {
     currentUser = null;
+    profileMemberId = null;
     document.getElementById('globalSearch').value = '';
     showAuth();
   });
@@ -435,7 +555,7 @@ function renderFeed() {
       return `
       <div class="card">
         <div class="row">
-          <h4>${esc(m.name)} <span class="meta">· ${esc(m.business_name || '')}</span></h4>
+          <h4>${plink(m.id, m.name)} <span class="meta">· ${esc(m.business_name || '')}</span></h4>
           <span class="badge post">${esc(groupName(m.group_id) || 'No group')}</span>
         </div>
         <p>${esc(p.content)}</p>
@@ -466,7 +586,7 @@ function listingCard(l) {
         <h4>${esc(l.title)}</h4>
         <span class="badge ${l.kind}">${l.kind}</span>
       </div>
-      <div class="meta">${esc(m.name)} · ${esc(m.business_name || '')} · ${esc(groupName(m.group_id) || 'No group')}</div>
+      <div class="meta">${plink(m.id, m.name)} · ${esc(m.business_name || '')} · ${esc(groupName(m.group_id) || 'No group')}</div>
       ${l.description ? `<p>${esc(l.description)}</p>` : ''}
       ${tagPills(l.tags)}
       <div class="listing-actions">
@@ -527,7 +647,7 @@ function renderMembers() {
     members.map((m) => `
       <div class="card">
         <div class="row">
-          <h4>${esc(m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
+          <h4>${plink(m.id, m.name)}${m.id === currentUser.id ? ' <span class="meta">(you)</span>' : ''}</h4>
           <span class="badge member">${esc(groupName(m.group_id) || 'No group')}</span>
         </div>
         <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
@@ -544,7 +664,7 @@ function renderSearch(q) {
   if (!searchKind || searchKind === 'member') {
     db.members.filter((m) => has(m.name) || has(m.business_name) || has(m.category))
       .forEach((m) => results.push({
-        type: 'member', title: m.name,
+        type: 'member', id: m.id, title: m.name,
         subtitle: [m.business_name, m.category].filter(Boolean).join(' • '),
         group: groupName(m.group_id),
       }));
@@ -573,7 +693,7 @@ function renderSearch(q) {
       results.map((r) => `
         <div class="card">
           <div class="row">
-            <h4>${esc(r.title)}</h4>
+            <h4>${r.type === 'member' ? plink(r.id, r.title) : esc(r.title)}</h4>
             <span class="badge ${r.type}">${r.type}</span>
           </div>
           ${r.subtitle ? `<p>${esc(r.subtitle)}</p>` : ''}
@@ -588,8 +708,11 @@ function renderSearch(q) {
 // ============================================================================
 function renderView() {
   const q = document.getElementById('globalSearch').value.trim();
-  fab.classList.toggle('hidden', currentView === 'members' || !!q);
+  fab.classList.toggle('hidden',
+    !!q || profileMemberId !== null || currentView === 'members' || currentView === 'matches');
   if (q) return renderSearch(q);
+  if (profileMemberId !== null) return renderProfile(profileMemberId);
+  if (currentView === 'matches') return renderMatches();
   if (currentView === 'feed') return renderFeed();
   if (currentView === 'asks') return renderListings('ask');
   if (currentView === 'gives') return renderListings('give');
@@ -677,6 +800,7 @@ document.querySelectorAll('.tab').forEach((tab) =>
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     tab.classList.add('active');
     currentView = tab.dataset.view;
+    profileMemberId = null;
     document.getElementById('globalSearch').value = '';
     renderView();
   }));
