@@ -6,6 +6,14 @@ and **Gives** (help they can offer). A single search box scans the **entire
 network** — members, posts, asks, and gives — so anyone can find the right
 connection fast.
 
+## Two surfaces, one app
+
+- **🌐 Network** — the community side: every member listed with their Asks &
+  Gives, a match-driven home screen, business-talk feed, and network-wide search
+- **📇 My CRM** — each member's private side: a personal contact book with
+  notes, follow-up dates, and phone numbers. Pull people in from network search
+  ("＋ Save to My Contacts") or add external contacts who aren't on the app
+
 ## Features
 
 - **Groups / Chapters** — organize members into networking groups
@@ -163,6 +171,11 @@ Endpoints marked 🔒 require an authenticated session cookie.
 | PATCH  | `/api/listings/:id` 🔒      | Owner-only: update status (`open`/`closed`)  |
 | POST   | `/api/listings/:id/responses` 🔒 | Respond / connect to a listing           |
 | GET    | `/api/listings/:id/responses` 🔒 | Owner/responder: view responses          |
+| GET    | `/api/matches` 🔒            | Ask↔Give tag matches for the home screen     |
+| GET    | `/api/contacts` 🔒           | Your private CRM contacts                    |
+| POST   | `/api/contacts` 🔒           | Add contact (`{member_id}` to link, or manual) |
+| PATCH  | `/api/contacts/:id` 🔒       | Owner-only: edit notes, follow-up, details   |
+| DELETE | `/api/contacts/:id` 🔒       | Owner-only: remove a contact                 |
 | GET    | `/api/search`                 | Cross-app search (`?q=...&kind=...`)         |
 
 ### Search example
