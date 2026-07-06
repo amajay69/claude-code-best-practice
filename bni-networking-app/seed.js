@@ -60,7 +60,8 @@ function populate() {
     [memberIds[1], 'give', 'Bookkeeping setup for new businesses', 'Can get your QuickBooks or Xero configured properly.', 'accounting,bookkeeping,quickbooks'],
     [memberIds[2], 'ask', 'Seeking a marketing partner for showroom launch', 'Opening a new interior design showroom, need social + PR help.', 'marketing,pr,launch'],
     [memberIds[3], 'give', 'Free 30-min legal consult for members', 'Contracts, incorporation, IP basics — first call is on me.', 'law,contracts,legal'],
-    [memberIds[4], 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros.', 'marketing,saas,referrals'],
+    [memberIds[4], 'ask', 'Referrals for B2B SaaS clients', 'We specialize in SaaS growth marketing and want intros — bonus if they need SEO too.', 'marketing,saas,referrals,seo'],
+    [memberIds[4], 'give', 'Social media strategy session', 'One free strategy session — content calendar, channels, and quick wins.', 'marketing,social,instagram'],
     [memberIds[5], 'give', 'Discounted plumbing for member offices', '15% off commercial plumbing for anyone in the network.', 'plumbing,trades,office'],
   ];
   const listingIds = listings.map((l) => Number(insertListing.run(...l).lastInsertRowid));
