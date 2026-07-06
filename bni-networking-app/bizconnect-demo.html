@@ -210,6 +210,18 @@
   .plink { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
   .plink:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
+  .spaces { display: flex; gap: 8px; padding: 16px 24px 0; }
+  .space {
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+    border-radius: 999px; padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .space.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .follow-chip {
+    font-size: 12px; border-radius: 999px; padding: 2px 9px;
+    background: var(--panel-2); color: var(--muted);
+  }
+  .follow-chip.overdue { background: rgba(255, 122, 122, 0.2); color: var(--danger); }
+
   .hidden { display: none !important; }
   @media (prefers-reduced-motion: no-preference) {
     .card { animation: rise 0.18s ease-out; }
@@ -252,13 +264,21 @@
     <div class="user-area" id="userArea"></div>
   </header>
 
-  <nav class="tabs">
+  <nav class="spaces">
+    <button class="space active" data-space="network">🌐 Network</button>
+    <button class="space" data-space="crm">📇 My CRM</button>
+  </nav>
+
+  <nav class="tabs" id="networkTabs">
     <button class="tab active" data-view="matches">Matches</button>
     <button class="tab" data-view="feed">Feed</button>
     <button class="tab" data-view="asks">Asks</button>
     <button class="tab" data-view="gives">Gives</button>
     <button class="tab" data-view="groups">Groups</button>
     <button class="tab" data-view="members">Members</button>
+  </nav>
+  <nav class="tabs hidden" id="crmTabs">
+    <button class="tab active" data-view="contacts">Contacts</button>
   </nav>
 
   <main id="app"></main>
@@ -285,7 +305,7 @@
 let nextId = 1;
 const id = () => nextId++;
 
-const db = { groups: [], members: [], posts: [], listings: [], responses: [] };
+const db = { groups: [], members: [], posts: [], listings: [], responses: [], contacts: [] };
 
 function seed() {
   const g1 = { id: id(), name: 'Sunrise Chapter', description: 'Early-morning networking for founders and service pros.' };
@@ -329,6 +349,12 @@ function seed() {
     { id: id(), listing_id: l1.id, member_id: dan.id, message: 'Hi Asha — I specialize in agency & freelancer taxes. Happy to help!', created_at: stamp() },
     { id: id(), listing_id: l4.id, member_id: sofia.id, message: "Marketing is our thing — we'd love to support your showroom launch.", created_at: stamp() },
   );
+
+  // Asha's personal CRM: one contact pulled from the network, one external.
+  db.contacts.push(
+    { id: id(), owner_id: asha.id, linked_member_id: dan.id, name: 'Daniel Cho', business_name: 'Cho Tax & Books', category: 'Accounting', email: 'dan@chotax.com', phone: '', notes: 'Responded to my accountant ask — schedule an intro call.', follow_up: null },
+    { id: id(), owner_id: asha.id, linked_member_id: null, name: 'Ravi Mehta', business_name: 'Mehta Printing', category: 'Print & Signage', email: 'ravi@mehtaprint.com', phone: '+91 98200 12345', notes: 'Met at the trade expo. Great pricing on banners — not on the app yet, invite him.', follow_up: null },
+  );
 }
 
 function stamp() { return new Date().toISOString().slice(0, 16).replace('T', ' '); }
@@ -345,8 +371,10 @@ const authScreen = document.getElementById('authScreen');
 const fab = document.getElementById('fab');
 
 let currentUser = null;
+let currentSpace = 'network'; // 'network' (community) | 'crm' (private contacts)
 let currentView = 'matches';
 let profileMemberId = null; // when set, the profile view overrides the tab view
+let contactDetailId = null; // when set (in CRM), the contact detail view shows
 let searchKind = '';
 let searchTimer = null;
 let authMode = 'login';
@@ -362,13 +390,121 @@ const val = (idStr) => { const el = document.getElementById(idStr); return el ? 
 
 // Clickable member name — anywhere a name appears it opens that profile.
 const plink = (mid, name) => `<a href="#" class="plink" data-mid="${mid}">${esc(name)}</a>`;
+
+// Pull a network member into the current user's private contacts.
+function addContact(memberId) {
+  if (memberId === currentUser.id) return 'You are always in your own corner — no need to add yourself';
+  const m = memberById(memberId);
+  if (db.contacts.some((c) => c.owner_id === currentUser.id && c.linked_member_id === memberId)) {
+    return `${m.name} is already in your contacts`;
+  }
+  db.contacts.push({
+    id: id(), owner_id: currentUser.id, linked_member_id: m.id,
+    name: m.name, business_name: m.business_name, category: m.category,
+    email: m.email, phone: '', notes: '', follow_up: null,
+  });
+  return null;
+}
+
 app.addEventListener('click', (e) => {
+  const add = e.target.closest('.add-contact');
+  if (add) {
+    const err = addContact(Number(add.dataset.mid));
+    if (err) { alert(err); return; }
+    add.textContent = '✓ In your contacts';
+    add.disabled = true;
+    return;
+  }
   const el = e.target.closest('.plink, .plink-btn');
   if (!el) return;
   e.preventDefault();
+  currentSpace = 'network'; // profiles live in the network space
+  syncSpaceUI();
   profileMemberId = Number(el.dataset.mid);
   renderView();
 });
+
+// ============================================================================
+// My CRM — private contact book (per logged-in member)
+// ============================================================================
+function renderContacts() {
+  const rows = db.contacts.filter((c) => c.owner_id === currentUser.id)
+    .sort((a, b) => (a.follow_up === null) - (b.follow_up === null) ||
+      String(a.follow_up).localeCompare(String(b.follow_up)) || a.name.localeCompare(b.name));
+  const today = new Date().toISOString().slice(0, 10);
+  app.innerHTML =
+    '<div class="section-title">My contacts — private to you</div>' +
+    (rows.length ? rows.map((c) => `
+      <div class="card contact-card" data-cid="${c.id}" style="cursor:pointer">
+        <div class="row">
+          <h4>${esc(c.name)}</h4>
+          <span class="badge ${c.linked_member_id ? 'member' : 'post'}">${c.linked_member_id ? 'in network' : 'external'}</span>
+        </div>
+        <div class="meta">${esc(c.business_name || '—')}${c.category ? ' · ' + esc(c.category) : ''}</div>
+        ${c.notes ? `<p>${esc(c.notes)}</p>` : ''}
+        <div class="listing-actions">
+          ${c.follow_up ? `<span class="follow-chip${c.follow_up < today ? ' overdue' : ''}">Follow up: ${esc(c.follow_up)}</span>` : ''}
+          ${c.email ? `<span class="count-badge">${esc(c.email)}</span>` : ''}
+          ${c.phone ? `<span class="count-badge">${esc(c.phone)}</span>` : ''}
+        </div>
+      </div>`).join('')
+    : '<div class="empty">No contacts yet. Tap ＋ to add someone, or search the network above and save people here.</div>');
+  document.querySelectorAll('.contact-card').forEach((card) =>
+    card.addEventListener('click', () => { contactDetailId = Number(card.dataset.cid); renderView(); }));
+}
+
+function renderContactDetail(cid) {
+  const c = db.contacts.find((x) => x.id === cid && x.owner_id === currentUser.id);
+  if (!c) { contactDetailId = null; return renderView(); }
+  const field = (label, idStr, value, type = 'text') =>
+    `<div class="field"><label>${label}</label><input id="${idStr}" type="${type}" value="${esc(value || '')}" /></div>`;
+  app.innerHTML = `
+    <button class="btn secondary small" id="backBtn">← Back to contacts</button>
+    <div class="card" style="margin-top:12px">
+      <div class="row">
+        <h4 style="font-size:20px">${esc(c.name)}</h4>
+        <span class="badge ${c.linked_member_id ? 'member' : 'post'}">${c.linked_member_id ? 'in network' : 'external'}</span>
+      </div>
+      ${c.linked_member_id ? `<div class="listing-actions"><button class="btn secondary small plink-btn" data-mid="${c.linked_member_id}">View live network profile →</button></div>` : ''}
+      <div style="margin-top:14px">
+        ${field('Name', 'c_name', c.name)}
+        ${field('Business', 'c_biz', c.business_name)}
+        ${field('Category', 'c_cat', c.category)}
+        ${field('Email', 'c_email', c.email, 'email')}
+        ${field('Phone', 'c_phone', c.phone)}
+        <div class="field"><label>Private notes (only you can see these)</label><textarea id="c_notes">${esc(c.notes || '')}</textarea></div>
+        ${field('Follow up on', 'c_follow', c.follow_up, 'date')}
+        <div class="listing-actions">
+          <button class="btn" id="saveContact">Save</button>
+          <button class="btn secondary small" id="deleteContact">Remove contact</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('backBtn').addEventListener('click', () => { contactDetailId = null; renderView(); });
+  document.getElementById('saveContact').addEventListener('click', () => {
+    Object.assign(c, {
+      name: val('c_name') || c.name, business_name: val('c_biz'), category: val('c_cat'),
+      email: val('c_email'), phone: val('c_phone'), notes: val('c_notes'),
+      follow_up: val('c_follow') || null,
+    });
+    contactDetailId = null;
+    renderView();
+  });
+  document.getElementById('deleteContact').addEventListener('click', () => {
+    if (!confirm(`Remove ${c.name} from your contacts?`)) return;
+    db.contacts = db.contacts.filter((x) => x.id !== c.id);
+    contactDetailId = null;
+    renderView();
+  });
+}
+
+// Keep the switcher buttons and tab bars in sync with currentSpace.
+function syncSpaceUI() {
+  document.querySelectorAll('.space').forEach((b) =>
+    b.classList.toggle('active', b.dataset.space === currentSpace));
+  document.getElementById('networkTabs').classList.toggle('hidden', currentSpace !== 'network');
+  document.getElementById('crmTabs').classList.toggle('hidden', currentSpace !== 'crm');
+}
 
 // ============================================================================
 // Matching engine — intersects your open listings with everyone else's on
@@ -454,6 +590,7 @@ function renderProfile(mid) {
       </div>
       <div class="meta">${esc(m.business_name || '—')}${m.category ? ' · ' + esc(m.category) : ''}</div>
       ${m.email ? `<div class="meta">${esc(m.email)}</div>` : ''}
+      ${!isMe ? `<div class="listing-actions"><button class="btn secondary small add-contact" data-mid="${m.id}">＋ Add to My Contacts</button></div>` : ''}
     </div>
     <div class="section-title">Open asks &amp; gives</div>` +
     (open.length ? open.map(listingCard).join('') : '<div class="empty">Nothing open right now.</div>') +
@@ -491,8 +628,12 @@ function showApp() {
     <button class="btn secondary small" id="logoutBtn">Log out</button>`;
   document.getElementById('logoutBtn').addEventListener('click', () => {
     currentUser = null;
+    currentSpace = 'network';
+    currentView = 'matches';
     profileMemberId = null;
+    contactDetailId = null;
     document.getElementById('globalSearch').value = '';
+    syncSpaceUI();
     showAuth();
   });
   renderView();
@@ -700,6 +841,9 @@ function renderSearch(q) {
           ${r.who ? `<div class="meta">${esc(r.who)}</div>` : ''}
           ${tagPills(r.tags)}
           ${r.group ? `<div class="meta">${esc(r.group)}</div>` : ''}
+          ${r.type === 'member' && r.id !== currentUser.id
+            ? `<div class="listing-actions"><button class="btn secondary small add-contact" data-mid="${r.id}">＋ Save to My Contacts</button></div>`
+            : ''}
         </div>`).join('');
 }
 
@@ -708,10 +852,17 @@ function renderSearch(q) {
 // ============================================================================
 function renderView() {
   const q = document.getElementById('globalSearch').value.trim();
-  fab.classList.toggle('hidden',
-    !!q || profileMemberId !== null || currentView === 'members' || currentView === 'matches');
-  if (q) return renderSearch(q);
+  const fabHidden = !!q || profileMemberId !== null ||
+    (currentSpace === 'crm'
+      ? contactDetailId !== null
+      : currentView === 'members' || currentView === 'matches');
+  fab.classList.toggle('hidden', fabHidden);
+  if (q) return renderSearch(q); // network-wide search from either space
   if (profileMemberId !== null) return renderProfile(profileMemberId);
+  if (currentSpace === 'crm') {
+    if (contactDetailId !== null) return renderContactDetail(contactDetailId);
+    return renderContacts();
+  }
   if (currentView === 'matches') return renderMatches();
   if (currentView === 'feed') return renderFeed();
   if (currentView === 'asks') return renderListings('ask');
@@ -745,6 +896,21 @@ function openRespond(listingId) {
 
 function openCreate() {
   let html = '';
+  if (currentSpace === 'crm') {
+    modalTitle.textContent = 'New contact';
+    modalBody.innerHTML = `
+      <div class="field"><label>Name</label><input id="f_name" /></div>
+      <div class="field"><label>Business name</label><input id="f_biz" /></div>
+      <div class="field"><label>Category</label><input id="f_cat" placeholder="e.g. Print &amp; Signage" /></div>
+      <div class="field"><label>Email</label><input id="f_email" type="email" /></div>
+      <div class="field"><label>Phone</label><input id="f_phone" /></div>
+      <div class="field"><label>Private notes</label><textarea id="f_notes"></textarea></div>
+      <div class="field"><label>Follow up on</label><input id="f_follow" type="date" /></div>
+      <button class="btn" id="f_submit">Add contact</button>`;
+    overlay.classList.remove('hidden');
+    document.getElementById('f_submit').addEventListener('click', submitCreate);
+    return;
+  }
   if (currentView === 'groups') {
     modalTitle.textContent = 'New group';
     html = `
@@ -771,6 +937,19 @@ function openCreate() {
 }
 
 function submitCreate() {
+  if (currentSpace === 'crm') {
+    const name = val('f_name');
+    if (!name) return alert('Name is required.');
+    db.contacts.push({
+      id: id(), owner_id: currentUser.id, linked_member_id: null,
+      name, business_name: val('f_biz'), category: val('f_cat'),
+      email: val('f_email'), phone: val('f_phone'), notes: val('f_notes'),
+      follow_up: val('f_follow') || null,
+    });
+    closeModal();
+    renderView();
+    return;
+  }
   if (currentView === 'groups') {
     const name = val('f_name');
     if (!name) return alert('Group name is required.');
@@ -795,12 +974,24 @@ function submitCreate() {
 document.querySelectorAll('.auth-tab').forEach((tab) =>
   tab.addEventListener('click', () => renderAuthForm(tab.dataset.auth)));
 
+document.querySelectorAll('.space').forEach((btn) =>
+  btn.addEventListener('click', () => {
+    currentSpace = btn.dataset.space;
+    profileMemberId = null;
+    contactDetailId = null;
+    if (currentSpace === 'network') currentView = 'matches';
+    document.getElementById('globalSearch').value = '';
+    syncSpaceUI();
+    renderView();
+  }));
+
 document.querySelectorAll('.tab').forEach((tab) =>
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+    tab.closest('.tabs').querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     tab.classList.add('active');
     currentView = tab.dataset.view;
     profileMemberId = null;
+    contactDetailId = null;
     document.getElementById('globalSearch').value = '';
     renderView();
   }));
