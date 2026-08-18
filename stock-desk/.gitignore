@@ -1,2 +1,6 @@
 # Analysis runs are local output, not source.
 runs/
+
+# Python bytecode
+__pycache__/
+*.pyc
