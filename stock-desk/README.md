@@ -23,6 +23,9 @@ python3 scripts/run_analysis.py --horizon positional --risk balanced
 # the same book under Vivek Bajaj's techno-funda framework
 python3 scripts/run_analysis.py --strategy bajaj --risk balanced
 
+# the same book ranked on value / quality / momentum / low-vol
+python3 scripts/run_analysis.py --strategy factor
+
 # the full desk
 claude
 > /portfolio-review fixtures/holdings.csv positional balanced standard
@@ -31,7 +34,7 @@ claude
 Stdlib only. No `pip install`, no dependencies.
 
 ```bash
-python3 -m unittest discover -s tests    # 83 tests
+python3 -m unittest discover -s tests    # 108 tests
 ```
 
 ## Architecture
@@ -75,18 +78,35 @@ expectancy, share counts — is computed by `core/` and written to
 two runs of the same portfolio agree on the facts even when they disagree on
 the call, and it is why the report card's arithmetic is reproducible.
 
-## Two strategies, deliberately disagreeing
+## Three strategies, deliberately disagreeing
 
-`--strategy` selects the verdict logic. Both read the same fact sheet.
+`--strategy` selects the verdict logic. All three read the same fact sheet.
 
-| | `baseline` (default) | `bajaj` |
-| --- | --- | --- |
-| Logic | additive: technical + fundamental | independent gates, all must pass |
-| Market regime | not consulted | assessed first; caps deployment at 100/50/25% |
-| Sector | concentration only | only leading sectors are eligible |
-| Buys | weakness in one leg offset by strength in the other | quality **and** momentum **and** leading sector **and** near highs |
-| Exit | combined score below a threshold | RS < 0 **and** Supertrend red, or fundamentals and momentum both poor |
-| Sizing | target weight multipliers | `shares = rupee risk / (entry − stop)`, capped at 25% |
+| | `baseline` (default) | `bajaj` | `factor` |
+| --- | --- | --- | --- |
+| Judges a stock by | additive score: technical + fundamental | independent gates, all must pass | position relative to the other holdings |
+| Needs the whole book first | no | yes — regime and sector ranks | yes — z-scores are cross-sectional |
+| Market regime | not consulted | assessed first; caps deployment at 100/50/25% | not consulted |
+| Buys | weakness in one leg offset by strength in the other | quality **and** momentum **and** leading sector **and** near highs | top of the book on the composite, clearing every absolute floor |
+| Exit | combined score below a threshold | RS < 0 **and** Supertrend red, or fundamentals and momentum both poor | bottom of the book **and** ≥2 failed absolute floors |
+| Sizing | target weight multipliers | `shares = rupee risk / (entry − stop)`, capped at 25% | not addressed |
+
+On the bundled fixture book they disagree on **7 of 10 holdings**:
+
+| Symbol | baseline | bajaj | factor |
+| --- | --- | --- | --- |
+| KOTAKBANK | accumulate | **exit** | hold |
+| HINDUNILVR | accumulate | **exit** | hold |
+| ICICIBANK | trim | hold | **accumulate** |
+| RELIANCE | exit | exit | exit |
+
+RELIANCE is the only unanimous call, and that unanimity is the most
+informative line in the output: three structurally different methods whose
+failure modes do not overlap arriving at the same answer is stronger
+evidence than any one of them being confident. A test asserts no two
+strategies may fully agree — if they ever do, one is redundant.
+
+### baseline vs bajaj: gates versus sums
 
 **The structural difference is gates versus sums.** A sum lets a +3
 fundamental offset a −2 momentum and buy. Bajaj forbids exactly that — *a
@@ -94,10 +114,26 @@ great company without price momentum is a narrative, not a trade* — so no
 amount of quality rescues dead momentum. That is why this is a separate
 strategy rather than extra indicators on the existing one.
 
-They disagree on the bundled fixture book, and a test asserts they must:
-the baseline rates KOTAKBANK and HINDUNILVR as `accumulate`, Bajaj exits
-both on RS below zero plus a red Supertrend. Seeing the disagreement is the
-point.
+### factor: relative, and why that is dangerous on your own book
+
+A factor score is a stock's rank among the others, so it cannot be computed
+for one symbol in isolation — `evaluate()` raises if called without a
+book-wide context. That requirement is what forced the strategy registry to
+stop name-checking `"bajaj"` and start asking each strategy what it needs.
+
+The hazard is subtler than the maths. **Standardising across ten holdings
+guarantees a bottom quintile whether or not one is deserved.** If all ten
+are excellent, two still rank at the bottom; if all ten are dreadful, two
+still rank at the top. A pure rank-to-action mapping would therefore
+recommend selling something on every run, forever — turnover manufactured
+by arithmetic.
+
+So ranks are paired with **absolute floors** (12-1 momentum below zero,
+quality below zero, earnings yield under 2%). The rank says *worst of what
+you own*; the floors say *bad in its own right*. An exit needs both. A low
+rank alone is a trim, and the verdict states that it is a relative call
+only. Confidence is halved below 30 names, because ten-name cross-sectional
+statistics do not support confident calls.
 
 ### What the Bajaj strategy does NOT implement
 
@@ -129,6 +165,8 @@ it there; nothing else assumes a particular formula.
 | [`core/relative_strength.py`](core/relative_strength.py) | Centred RS, RS zones, sector ranking |
 | [`core/regime.py`](core/regime.py) | Market regime and the deployment ceiling |
 | [`core/strategies/bajaj.py`](core/strategies/bajaj.py) | The techno-funda gates, sizing and exit rules |
+| [`core/factors.py`](core/factors.py) | Cross-sectional value / quality / momentum / low-vol z-scores |
+| [`core/strategies/factor.py`](core/strategies/factor.py) | Factor ranks paired with absolute floors |
 | [`core/fallback.py`](core/fallback.py) | Deterministic verdicts — the amber path and the agents' fact sheet |
 | [`core/report.py`](core/report.py) | Health verdict, action queue, run persistence |
 | [`.claude/agents/`](.claude/agents/) | The ten desk agents |
