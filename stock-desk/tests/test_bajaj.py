@@ -377,12 +377,16 @@ class TestStrategyIntegration(unittest.TestCase):
 
     def test_strategy_is_registered_and_distinct(self):
         self.assertIn("bajaj", STRATEGIES)
-        self.assertIsNot(get("bajaj"), get("baseline"))
+        self.assertIsNot(get("bajaj").evaluate, get("baseline").evaluate)
+        self.assertTrue(get("bajaj").needs_context)
+        self.assertFalse(get("baseline").needs_context)
 
     def test_the_two_strategies_disagree_on_this_book(self):
         """If they ever fully agree, one of them is not doing its job."""
         baseline = {
-            h.symbol: get("baseline")(h.symbol, self.adapter, avg_cost=h.avg_cost)["action"]
+            h.symbol: get("baseline").evaluate(
+                h.symbol, self.adapter, avg_cost=h.avg_cost
+            )["action"]
             for h in self.holdings
         }
         bajaj = {s: v["action"] for s, v in self.verdicts.items()}
