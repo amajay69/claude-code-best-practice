@@ -187,11 +187,18 @@ def analyse(
         sum(ordered_weights[i] * matrix[i][k] for i in range(len(symbols)))
         for k in range(width)
     ]
+    # The benchmark may be absent — a user can upload holdings history and
+    # forget the index. Everything derived from it becomes None rather than
+    # the run failing or, worse, a zero masquerading as a measurement.
     bench = adapter.benchmark(lookback_days)
-    bench_rets = returns([b.close for b in bench])
-    port_beta = beta(portfolio_rets, bench_rets)
+    bench_rets = returns([b.close for b in bench]) if bench else []
+    port_beta = beta(portfolio_rets, bench_rets) if bench_rets else None
     port_vol = annualised_vol([1.0] + _compound(portfolio_rets))
-    bench_return = (bench[-1].close - bench[0].close) / bench[0].close if bench else None
+    bench_return = (
+        (bench[-1].close - bench[0].close) / bench[0].close
+        if len(bench) >= 2 and bench[0].close
+        else None
+    )
     port_return = (total - invested) / invested if invested else None
 
     # --- risk score ----------------------------------------------------
@@ -235,6 +242,7 @@ def analyse(
         },
         "benchmark": {
             "symbol": adapter.benchmark_symbol,
+            "available": bool(bench),
             "benchmark_return_pct": round(bench_return * 100, 2) if bench_return is not None else None,
             "portfolio_return_pct": round(port_return * 100, 2) if port_return is not None else None,
             "beating_index": (
