@@ -20,9 +20,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.adapter import FixtureAdapter, load_holdings          # noqa: E402
 from core.backtest import HOLD_DAYS, STOP_ATR                   # noqa: E402
-from core.fallback import evaluate                              # noqa: E402
+from core.regime import market_regime                         # noqa: E402
+from core.relative_strength import sector_rankings            # noqa: E402
+from core.strategies import NEEDS_CONTEXT, STRATEGIES, get    # noqa: E402
+from core.strategies.bajaj import portfolio_construction      # noqa: E402
 from core.portfolio import analyse                              # noqa: E402
-from core.report import action_queue, health_verdict, render_markdown, write_run  # noqa: E402
+from core.report import (                                      # noqa: E402
+    action_queue, health_verdict, render_bajaj_sections, render_markdown, write_run,
+)
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEPTHS = ("quick", "standard", "deep")
@@ -35,6 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--horizon", default="positional", choices=sorted(HOLD_DAYS))
     p.add_argument("--risk", default="balanced", choices=sorted(STOP_ATR))
     p.add_argument("--depth", default="standard", choices=DEPTHS)
+    p.add_argument(
+        "--strategy", default="baseline", choices=sorted(STRATEGIES),
+        help="verdict logic: 'baseline' sums scores, 'bajaj' applies independent gates",
+    )
     p.add_argument("--out", default=os.path.join(HERE, "runs"))
     p.add_argument("--stamp", default=None, help="fixed run folder name (for tests)")
     p.add_argument("--quiet", action="store_true")
@@ -44,20 +53,37 @@ def main(argv: list[str] | None = None) -> int:
     holdings = load_holdings(args.holdings)
 
     book = analyse(holdings, adapter, stated_risk=args.risk)
-    verdicts = {
-        h.symbol: evaluate(
-            h.symbol, adapter,
-            horizon=args.horizon, risk_profile=args.risk, avg_cost=h.avg_cost,
+
+    # Market context is computed once and shared. Bajaj's first rule is that
+    # the regime is assessed before any stock is read, so it cannot be a
+    # per-symbol afterthought.
+    symbols = [h.symbol for h in holdings]
+    context: dict | None = None
+    if args.strategy in NEEDS_CONTEXT:
+        context = {
+            "regime": market_regime(adapter, symbols),
+            "sector_rankings": sector_rankings(symbols, adapter),
+            "portfolio_value": book["totals"]["market_value"],
+        }
+
+    strategy = get(args.strategy)
+    verdicts = {}
+    for h in holdings:
+        kwargs = dict(
+            horizon=args.horizon, risk_profile=args.risk, avg_cost=h.avg_cost
         )
-        for h in holdings
-    }
+        if context is not None:
+            kwargs["context"] = dict(context, held_qty=h.qty)
+        verdicts[h.symbol] = strategy(h.symbol, adapter, **kwargs)
     health = health_verdict(book)
     queue = action_queue(verdicts, holdings, book)
     dials = {"horizon": args.horizon, "risk_profile": args.risk, "depth": args.depth}
 
     payload = {
         "dials": dials,
+        "strategy": args.strategy,
         "engine": "rules",
+        "market_context": context,
         "data_source": {
             "adapter": type(adapter).__name__,
             "adjusted": adapter.adjusted,
@@ -79,7 +105,12 @@ def main(argv: list[str] | None = None) -> int:
             for s, vd in verdicts.items()
         },
     }
+    if args.strategy == "bajaj":
+        payload["portfolio_construction"] = portfolio_construction(verdicts, book)
+
     markdown = render_markdown(book, health, queue, dials)
+    if args.strategy == "bajaj":
+        markdown += render_bajaj_sections(payload)
     path = write_run(args.out, payload, markdown, stamp=args.stamp)
 
     if not args.quiet:
