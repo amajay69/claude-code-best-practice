@@ -1,6 +1,10 @@
 # Analysis runs are local output, not source.
 runs/
 
+# Your real portfolio and price history. Never commit this.
+data/*
+!data/README.md
+
 # Python bytecode
 __pycache__/
 *.pyc
