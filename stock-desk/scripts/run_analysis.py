@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.adapter import FixtureAdapter, load_holdings          # noqa: E402
+from core.live import LiveAdapter                              # noqa: E402
 from core.backtest import HOLD_DAYS, STOP_ATR                   # noqa: E402
 from core.strategies import STRATEGIES, get                   # noqa: E402
 from core.portfolio import analyse                              # noqa: E402
@@ -43,10 +44,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--out", default=os.path.join(HERE, "runs"))
     p.add_argument("--stamp", default=None, help="fixed run folder name (for tests)")
+    p.add_argument(
+        "--data", default=None,
+        help="use live data from this directory (history/, quotes.json) instead "
+             "of the synthetic fixtures",
+    )
+    p.add_argument(
+        "--adjusted", action="store_true",
+        help="declare --data prices split-adjusted (see scripts/import_history.py)",
+    )
+    p.add_argument(
+        "--excel", nargs="?", const=True, default=False,
+        help="also write an Excel workbook. Runs every strategy, since the "
+             "Verdicts sheet compares them.",
+    )
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args(argv)
 
-    adapter = FixtureAdapter(args.fixtures)
+    if args.data:
+        marker = os.path.join(args.data, "history", ".adjusted")
+        adapter = LiveAdapter(
+            args.data, adjusted=args.adjusted or os.path.exists(marker)
+        )
+    else:
+        adapter = FixtureAdapter(args.fixtures)
     holdings = load_holdings(args.holdings)
 
     book = analyse(holdings, adapter, stated_risk=args.risk)
@@ -70,6 +91,28 @@ def main(argv: list[str] | None = None) -> int:
         if context is not None:
             kwargs["context"] = dict(context, held_qty=h.qty)
         verdicts[h.symbol] = strategy.evaluate(h.symbol, adapter, **kwargs)
+    # The Verdicts sheet compares strategies, so Excel output needs them all.
+    strategy_runs: dict[str, dict] = {args.strategy: verdicts}
+    if args.excel:
+        for name in STRATEGIES:
+            if name == args.strategy:
+                continue
+            other = get(name)
+            other_ctx = (
+                other.build_context(symbols, adapter, book)
+                if other.needs_context
+                else None
+            )
+            strategy_runs[name] = {
+                h.symbol: other.evaluate(
+                    h.symbol, adapter, horizon=args.horizon,
+                    risk_profile=args.risk, avg_cost=h.avg_cost,
+                    **({"context": dict(other_ctx, held_qty=h.qty)} if other_ctx else {}),
+                )
+                for h in holdings
+            }
+        strategy_runs = {n: strategy_runs[n] for n in STRATEGIES if n in strategy_runs}
+
     health = health_verdict(book)
     queue = action_queue(verdicts, holdings, book)
     dials = {"horizon": args.horizon, "risk_profile": args.risk, "depth": args.depth}
@@ -92,6 +135,11 @@ def main(argv: list[str] | None = None) -> int:
             {"symbol": h.symbol, "qty": h.qty, "avg_cost": h.avg_cost} for h in holdings
         ],
         "book": book,
+        "strategy_runs": {
+            name: {s: {"action": v["action"], "reasons": v.get("reasons", [])}
+                   for s, v in run.items()}
+            for name, run in strategy_runs.items()
+        } if args.excel else None,
         "health": health,
         "action_queue": queue,
         # 'quick' keeps the run folder small; 'deep' keeps every setup's stats.
@@ -107,6 +155,24 @@ def main(argv: list[str] | None = None) -> int:
     if strategy.render_sections:
         markdown += strategy.render_sections(payload)
     path = write_run(args.out, payload, markdown, stamp=args.stamp)
+
+    if args.excel:
+        from core.excel import write_workbook
+
+        prices = (
+            {h.symbol: adapter.last_price(h.symbol) for h in holdings}
+            if isinstance(adapter, LiveAdapter)
+            else {h.symbol: (verdicts[h.symbol]["last_close"], "fixture") for h in holdings}
+        )
+        coverage = (
+            adapter.report(symbols) if isinstance(adapter, LiveAdapter) else None
+        )
+        xlsx = args.excel if isinstance(args.excel, str) else os.path.join(
+            path, "portfolio-review.xlsx"
+        )
+        write_workbook(payload, xlsx, prices=prices, coverage=coverage)
+        if not args.quiet:
+            print(f"workbook written to {xlsx}")
 
     if not args.quiet:
         print(markdown)
