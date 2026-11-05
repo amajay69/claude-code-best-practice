@@ -1,7 +1,7 @@
 ---
 name: portfolio-review
 description: Run the full analyst desk over a holdings file and produce a report card
-argument-hint: [holdings-csv] [horizon] [risk-profile] [depth]
+argument-hint: [holdings-csv] [horizon] [risk-profile] [depth] [strategy]
 allowed-tools: Bash, Read, Write, Agent, Skill
 model: opus
 ---
@@ -27,8 +27,19 @@ change the analysis, not just the presentation.
 
 ```bash
 python3 scripts/run_analysis.py --holdings <$1> --horizon <$2> \
-    --risk <$3> --depth <$4> --quiet
+    --risk <$3> --depth <$4> --strategy <$5> --quiet
 ```
+
+`$5` selects the verdict logic and defaults to `baseline`:
+
+| Strategy | Logic |
+| --- | --- |
+| `baseline` | additive — technical score plus fundamental score |
+| `bajaj` | independent gates, all six must pass; regime-first, momentum-gated |
+
+They will disagree on the same book, and that disagreement is worth
+reporting rather than reconciling. A stock the baseline rates "good company
+at a mediocre moment" is a buy under a sum and a reject under a gate.
 
 Note the run folder it prints. Everything downstream reads
 `<run>/analysis.json`, and **no agent recomputes any number in it.** That is
@@ -36,6 +47,18 @@ what keeps two runs of the same book agreeing on the facts.
 
 If this command fails, stop and report the failure. Do not proceed with
 agents reading a stale or missing fact sheet.
+
+## Step 1b — regime first (Bajaj strategy only)
+
+When `$5` is `bajaj`, invoke the regime analyst **before** the specialists.
+In this framework the market regime caps deployment, so judging stocks
+before reading the tape inverts the method.
+
+```
+Agent(subagent_type="regime-analyst", prompt="Analyse <run>/analysis.json")
+```
+
+Carry its `deployment_ceiling` into every later step: no plan may exceed it.
 
 ## Step 2 — four specialists, one pass each
 
