@@ -20,6 +20,9 @@ cd stock-desk
 # deterministic pass — no model, no API key, no network
 python3 scripts/run_analysis.py --horizon positional --risk balanced
 
+# the same book under Vivek Bajaj's techno-funda framework
+python3 scripts/run_analysis.py --strategy bajaj --risk balanced
+
 # the full desk
 claude
 > /portfolio-review fixtures/holdings.csv positional balanced standard
@@ -28,7 +31,7 @@ claude
 Stdlib only. No `pip install`, no dependencies.
 
 ```bash
-python3 -m unittest discover -s tests    # 39 tests
+python3 -m unittest discover -s tests    # 83 tests
 ```
 
 ## Architecture
@@ -72,6 +75,49 @@ expectancy, share counts — is computed by `core/` and written to
 two runs of the same portfolio agree on the facts even when they disagree on
 the call, and it is why the report card's arithmetic is reproducible.
 
+## Two strategies, deliberately disagreeing
+
+`--strategy` selects the verdict logic. Both read the same fact sheet.
+
+| | `baseline` (default) | `bajaj` |
+| --- | --- | --- |
+| Logic | additive: technical + fundamental | independent gates, all must pass |
+| Market regime | not consulted | assessed first; caps deployment at 100/50/25% |
+| Sector | concentration only | only leading sectors are eligible |
+| Buys | weakness in one leg offset by strength in the other | quality **and** momentum **and** leading sector **and** near highs |
+| Exit | combined score below a threshold | RS < 0 **and** Supertrend red, or fundamentals and momentum both poor |
+| Sizing | target weight multipliers | `shares = rupee risk / (entry − stop)`, capped at 25% |
+
+**The structural difference is gates versus sums.** A sum lets a +3
+fundamental offset a −2 momentum and buy. Bajaj forbids exactly that — *a
+great company without price momentum is a narrative, not a trade* — so no
+amount of quality rescues dead momentum. That is why this is a separate
+strategy rather than extra indicators on the existing one.
+
+They disagree on the bundled fixture book, and a test asserts they must:
+the baseline rates KOTAKBANK and HINDUNILVR as `accumulate`, Bajaj exits
+both on RS below zero plus a red Supertrend. Seeing the disagreement is the
+point.
+
+### What the Bajaj strategy does NOT implement
+
+Stated plainly, because partial implementations of a published framework
+invite the assumption of full coverage:
+
+| Missing | Why |
+| --- | --- |
+| Mother-Daughter 2-hour entry timing | daily bars only; faking it on daily data yields a precise-looking entry price that means nothing |
+| True sector-index ranking | approximated from holdings' own RS — a sector held by one stock is ranked on that stock, and flagged `proxy_warning` |
+| Broad-market breadth | computed over the portfolio, marked `reliable: false`, and ignored in the regime call below 50 names |
+
+### One definition that is a judgement call
+
+"RS above 0" is ambiguous in the source — a raw `stock / index` ratio is
+always positive. [`core/relative_strength.py`](core/relative_strength.py)
+uses the Dorsey-style centred form, `(ratio / SMA(ratio, 55) − 1) × 100`,
+so zero means "outperforming by more than its own recent average". Change
+it there; nothing else assumes a particular formula.
+
 ## Layout
 
 | Path | What it is |
@@ -80,6 +126,9 @@ the call, and it is why the report card's arithmetic is reproducible.
 | [`core/indicators.py`](core/indicators.py) | SMA, EMA, RSI, ATR, vol, drawdown — pure functions |
 | [`core/backtest.py`](core/backtest.py) | Setup replay: win rate, expectancy, sufficiency |
 | [`core/portfolio.py`](core/portfolio.py) | Concentration, correlation, effective bets, beta, benchmark |
+| [`core/relative_strength.py`](core/relative_strength.py) | Centred RS, RS zones, sector ranking |
+| [`core/regime.py`](core/regime.py) | Market regime and the deployment ceiling |
+| [`core/strategies/bajaj.py`](core/strategies/bajaj.py) | The techno-funda gates, sizing and exit rules |
 | [`core/fallback.py`](core/fallback.py) | Deterministic verdicts — the amber path and the agents' fact sheet |
 | [`core/report.py`](core/report.py) | Health verdict, action queue, run persistence |
 | [`.claude/agents/`](.claude/agents/) | The ten desk agents |
@@ -108,6 +157,13 @@ renormalised to 100%. Renormalising would push every rupee freed by an exit
 straight back into whatever remains, turning "sell three names" into
 "concentrate harder into the rest". Unallocated capital stays in cash, and
 the report says how much.
+
+**Risk sizing without a position cap is dangerous.** `shares = risk /
+(entry − stop)` bounds the *loss*; it does not bound the *position*. A stop
+₹3 below a ₹223 share turns a ₹10,550 budget into 3,049 shares — 64% of the
+book on one name, with the loss still correctly capped at 1%. Bajaj's rules
+4 and 5 are not redundant, and implementing either alone is unsafe. See
+`position_size` in [`core/strategies/bajaj.py`](core/strategies/bajaj.py).
 
 **Adding to a deep loser requires evidence, not a score.** A position more
 than 25% underwater can only be added to when its own history supports the
