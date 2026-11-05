@@ -68,6 +68,18 @@ def market_regime(
 ) -> dict:
     """Classify the tape and derive the deployment ceiling."""
     index_bars: list[Bar] = adapter.benchmark(lookback_days)
+    if not index_bars:
+        return {
+            "regime": "unknown",
+            "deployment_ceiling": None,
+            "index_symbol": adapter.benchmark_symbol,
+            "index_trend": "unknown",
+            "breadth": breadth(universe, adapter, lookback_days),
+            "reasons": [
+                f"no history for {adapter.benchmark_symbol}: the regime cannot be "
+                "assessed, so no deployment ceiling is set. Export the index."
+            ],
+        }
     px = closes(index_bars)
     trend = trend_state(px)
     off_high = pct_from_high(px)
