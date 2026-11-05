@@ -95,6 +95,110 @@ def atr(bars: list[Bar], window: int = 14) -> float | None:
     return value
 
 
+def atr_series(bars: list[Bar], window: int = 14) -> list[float | None]:
+    """Rolling Wilder ATR aligned to ``bars`` (``None`` until the window fills).
+
+    Supertrend needs ATR at every bar, not just the last one, so this exists
+    alongside the scalar :func:`atr`.
+    """
+    out: list[float | None] = [None] * len(bars)
+    if len(bars) < window + 1:
+        return out
+    trs = []
+    for prev, cur in zip(bars, bars[1:]):
+        trs.append(
+            max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
+        )
+    value = sum(trs[:window]) / window
+    out[window] = value
+    for i, tr in enumerate(trs[window:], start=window + 1):
+        value = (value * (window - 1) + tr) / window
+        out[i] = value
+    return out
+
+
+def supertrend(bars: list[Bar], window: int = 10, multiplier: float = 3.0) -> dict:
+    """Supertrend direction and level — one half of Bajaj's exit trigger.
+
+    Returns ``{"direction": "green"|"red"|None, "level": float|None,
+    "flipped_bars_ago": int|None}``.
+
+    The band carry-forward is the part people get wrong: a band only moves in
+    the favourable direction while the trend holds, and ratchets rather than
+    tracking price tick for tick.  Recomputing the raw band each bar produces
+    a Supertrend that flips constantly and is useless as an exit.
+    """
+    atrs = atr_series(bars, window)
+    n = len(bars)
+    if n < window + 2:
+        return {"direction": None, "level": None, "flipped_bars_ago": None}
+
+    final_upper: list[float | None] = [None] * n
+    final_lower: list[float | None] = [None] * n
+    direction: list[int | None] = [None] * n   # +1 green (long), -1 red (short)
+
+    for i in range(n):
+        a = atrs[i]
+        if a is None:
+            continue
+        mid = (bars[i].high + bars[i].low) / 2
+        basic_upper, basic_lower = mid + multiplier * a, mid - multiplier * a
+        prev_u, prev_l = final_upper[i - 1], final_lower[i - 1]
+
+        if prev_u is None or basic_upper < prev_u or bars[i - 1].close > prev_u:
+            final_upper[i] = basic_upper
+        else:
+            final_upper[i] = prev_u
+        if prev_l is None or basic_lower > prev_l or bars[i - 1].close < prev_l:
+            final_lower[i] = basic_lower
+        else:
+            final_lower[i] = prev_l
+
+        if direction[i - 1] is None:
+            direction[i] = 1 if bars[i].close > final_upper[i] else -1
+        elif direction[i - 1] == 1:
+            direction[i] = -1 if bars[i].close < final_lower[i] else 1
+        else:
+            direction[i] = 1 if bars[i].close > final_upper[i] else -1
+
+    last = direction[-1]
+    if last is None:
+        return {"direction": None, "level": None, "flipped_bars_ago": None}
+
+    flipped = None
+    for back in range(1, n):
+        if direction[-1 - back] is not None and direction[-1 - back] != last:
+            flipped = back
+            break
+
+    return {
+        "direction": "green" if last == 1 else "red",
+        "level": round(final_lower[-1] if last == 1 else final_upper[-1], 2),
+        "flipped_bars_ago": flipped,
+    }
+
+
+def strong_zone(bars: list[Bar], tolerance: float = 0.05, window: int = 252) -> dict:
+    """Is the stock in Bajaj's 'strong zone' — at or near its highs?
+
+    His entry rule is to buy strength rather than catch falling knives, so
+    this measures proximity to the rolling high and to the all-time high in
+    the available history.
+    """
+    px = closes(bars)
+    if not px:
+        return {"in_zone": False, "pct_from_high": None, "at_ath": False}
+    recent_high = max(px[-window:])
+    ath = max(px)
+    off = (px[-1] - recent_high) / recent_high if recent_high else None
+    return {
+        "in_zone": off is not None and off >= -tolerance,
+        "pct_from_high": round(off, 4) if off is not None else None,
+        "at_ath": px[-1] >= ath * (1 - 1e-9),
+        "rolling_high": round(recent_high, 2),
+    }
+
+
 def annualised_vol(series: list[float], periods: int = 252) -> float | None:
     """Annualised stdev of daily returns."""
     rets = returns(series)
@@ -156,5 +260,7 @@ def snapshot(bars: list[Bar]) -> dict:
         "max_drawdown_2y": max_drawdown(px),
         "pct_from_52w_high": pct_from_high(px),
         "trend": trend_state(px),
+        "supertrend": supertrend(bars),
+        "strong_zone": strong_zone(bars),
         "bars": len(bars),
     }
