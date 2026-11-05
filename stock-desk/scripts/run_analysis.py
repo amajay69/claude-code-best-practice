@@ -20,13 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.adapter import FixtureAdapter, load_holdings          # noqa: E402
 from core.backtest import HOLD_DAYS, STOP_ATR                   # noqa: E402
-from core.regime import market_regime                         # noqa: E402
-from core.relative_strength import sector_rankings            # noqa: E402
-from core.strategies import NEEDS_CONTEXT, STRATEGIES, get    # noqa: E402
-from core.strategies.bajaj import portfolio_construction      # noqa: E402
+from core.strategies import STRATEGIES, get                   # noqa: E402
 from core.portfolio import analyse                              # noqa: E402
 from core.report import (                                      # noqa: E402
-    action_queue, health_verdict, render_bajaj_sections, render_markdown, write_run,
+    action_queue, health_verdict, render_markdown, write_run,
 )
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,19 +51,17 @@ def main(argv: list[str] | None = None) -> int:
 
     book = analyse(holdings, adapter, stated_risk=args.risk)
 
-    # Market context is computed once and shared. Bajaj's first rule is that
-    # the regime is assessed before any stock is read, so it cannot be a
-    # per-symbol afterthought.
-    symbols = [h.symbol for h in holdings]
-    context: dict | None = None
-    if args.strategy in NEEDS_CONTEXT:
-        context = {
-            "regime": market_regime(adapter, symbols),
-            "sector_rankings": sector_rankings(symbols, adapter),
-            "portfolio_value": book["totals"]["market_value"],
-        }
-
+    # Book-wide context is computed once, by the strategy that needs it.
+    # Some strategies cannot score a stock in isolation at all: the factor
+    # model's z-scores are cross-sectional, and Bajaj reads the market regime
+    # before any stock. The runner asks the strategy rather than its name.
     strategy = get(args.strategy)
+    symbols = [h.symbol for h in holdings]
+    context = (
+        strategy.build_context(symbols, adapter, book)
+        if strategy.needs_context
+        else None
+    )
     verdicts = {}
     for h in holdings:
         kwargs = dict(
@@ -74,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if context is not None:
             kwargs["context"] = dict(context, held_qty=h.qty)
-        verdicts[h.symbol] = strategy(h.symbol, adapter, **kwargs)
+        verdicts[h.symbol] = strategy.evaluate(h.symbol, adapter, **kwargs)
     health = health_verdict(book)
     queue = action_queue(verdicts, holdings, book)
     dials = {"horizon": args.horizon, "risk_profile": args.risk, "depth": args.depth}
@@ -105,12 +100,12 @@ def main(argv: list[str] | None = None) -> int:
             for s, vd in verdicts.items()
         },
     }
-    if args.strategy == "bajaj":
-        payload["portfolio_construction"] = portfolio_construction(verdicts, book)
+    if strategy.post_process:
+        payload.update(strategy.post_process(verdicts, book))
 
     markdown = render_markdown(book, health, queue, dials)
-    if args.strategy == "bajaj":
-        markdown += render_bajaj_sections(payload)
+    if strategy.render_sections:
+        markdown += strategy.render_sections(payload)
     path = write_run(args.out, payload, markdown, stamp=args.stamp)
 
     if not args.quiet:
